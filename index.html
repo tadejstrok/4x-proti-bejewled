@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="sl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <title>4X PROTI — Igra</title>
+  <meta name="description" content="Poveži tri enake obraze in sproži 4X PROTI bombo. 11. oktobra — 4X PROTI.">
+  <meta property="og:title" content="4X PROTI — Igra">
+  <meta property="og:description" content="Poveži tri enake obraze in sproži 4X PROTI bombo.">
+  <meta property="og:image" content="public/4xproti.png">
+  <link rel="icon" href="public/4xproti.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg" aria-hidden="true"></div>
+
+  <!-- Title screen -->
+  <section id="screen-menu" class="screen active">
+    <img class="logo bob" src="public/4xproti.png" alt="11. oktobra — 4X PROTI">
+    <p class="tagline">Poveži 3 enake obraze.<br>4 v vrsto = <b>4X PROTI</b> bomba!</p>
+    <div class="buttons">
+      <button id="btn-play" class="btn primary" disabled>Nalaganje…</button>
+      <button id="btn-zen" class="btn" disabled>Zen</button>
+    </div>
+    <div class="best-line">
+      Rekord: <span id="best-timed">0</span> &nbsp;·&nbsp; Zen: <span id="best-zen">0</span>
+    </div>
+    <button class="icon-btn mute-btn corner" aria-label="Zvok">🔊</button>
+  </section>
+
+  <!-- Game screen -->
+  <section id="screen-game" class="screen">
+    <header class="hud">
+      <button id="btn-quit" class="icon-btn" aria-label="Nazaj">✕</button>
+      <div class="stat"><label>Točke</label><span id="score">0</span></div>
+      <div class="stat"><label>Nivo</label><span id="level">1</span></div>
+      <div class="stat" id="timer-stat"><label>Čas</label><span id="time">90</span></div>
+      <button class="icon-btn mute-btn" aria-label="Zvok">🔊</button>
+    </header>
+    <div class="board-wrap" id="board-wrap">
+      <div class="board" id="board"></div>
+      <canvas id="fx"></canvas>
+      <div class="overlay" id="overlay"></div>
+    </div>
+    <div class="progress" aria-hidden="true"><div id="progress-fill"></div></div>
+  </section>
+
+  <!-- Game over screen -->
+  <section id="screen-over" class="screen">
+    <h1 class="over-title">Konec!</h1>
+    <div class="final">
+      <label>Tvoj rezultat</label>
+      <div id="final-score">0</div>
+      <div id="new-record" class="badge" hidden>Nov rekord!</div>
+      <div class="final-best">Rekord: <span id="final-best">0</span></div>
+    </div>
+    <div class="buttons">
+      <button id="btn-again" class="btn primary">Še enkrat</button>
+      <button id="btn-share" class="btn">Deli</button>
+      <button id="btn-menu" class="btn ghost">Meni</button>
+    </div>
+    <div class="strip">
+      <img src="public/4xproti.png" alt="">
+      <span>11. oktobra — 4X PROTI</span>
+    </div>
+  </section>
+
+  <div id="flash" aria-hidden="true"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/logic.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
