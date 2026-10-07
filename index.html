@@ -26,6 +26,7 @@
       <button id="btn-play" class="btn primary" disabled>Nalaganje…</button>
       <button id="btn-zen" class="btn" disabled>Zen</button>
     </div>
+    <button id="btn-leaderboard" class="btn ghost">Lestvica</button>
     <div class="best-line">
       Rekord: <span id="best-timed">0</span> &nbsp;·&nbsp; Zen: <span id="best-zen">0</span>
     </div>
@@ -58,6 +59,7 @@
       <div id="new-record" class="badge" hidden>Nov rekord!</div>
       <div class="final-best">Rekord: <span id="final-best">0</span></div>
     </div>
+    <button id="btn-submit" class="btn primary wide" hidden>Vpiši na lestvico</button>
     <div class="buttons">
       <button id="btn-again" class="btn primary">Še enkrat</button>
       <button id="btn-share" class="btn">Deli</button>
@@ -65,7 +67,42 @@
     </div>
     <div class="strip">
       <img src="public/4xproti.png" alt="">
-      <span>11. oktobra — 4X PROTI</span>
+      <span>V nedeljo<br>glasuj 4X PROTI</span>
+    </div>
+  </section>
+
+  <!-- Leaderboard entry form -->
+  <section id="screen-submit" class="screen">
+    <div class="panel">
+      <h2 class="screen-title">Vpiši se na lestvico</h2>
+      <div class="submit-score">Rezultat: <span id="submit-score">0</span></div>
+      <form id="submit-form" class="form" novalidate>
+        <label for="nick">Vzdevek</label>
+        <input id="nick" name="nickname" type="text" maxlength="20" autocomplete="nickname" autocapitalize="off" spellcheck="false" required>
+        <label for="msg">Sporočilo <small>(neobvezno)</small></label>
+        <textarea id="msg" name="message" maxlength="100" rows="3"></textarea>
+        <div class="counter"><span id="msg-count">0</span>/100</div>
+        <p class="form-note">Vzdevek in sporočilo bosta javno vidna na lestvici.</p>
+        <p id="form-error" class="form-error" role="alert"></p>
+        <div class="buttons">
+          <button type="submit" id="btn-send" class="btn primary">Pošlji</button>
+          <button type="button" id="btn-cancel" class="btn ghost">Prekliči</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Leaderboard -->
+  <section id="screen-board" class="screen">
+    <div class="panel">
+      <h2 class="screen-title">Lestvica</h2>
+      <p id="board-rank" class="board-rank" hidden></p>
+      <ol id="board-list" class="board-list"></ol>
+      <p id="board-status" class="board-status"></p>
+      <p id="board-local" class="form-note" hidden>Testna lestvica: vpisi so shranjeni samo na tej napravi.</p>
+      <div class="buttons">
+        <button id="btn-board-back" class="btn">Nazaj</button>
+      </div>
     </div>
   </section>
 
@@ -74,6 +111,8 @@
 
   <script src="js/logic.js"></script>
   <script src="js/audio.js"></script>
+  <script src="js/filter.js"></script>
+  <script src="js/leaderboard.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

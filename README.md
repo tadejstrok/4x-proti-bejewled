@@ -21,6 +21,8 @@ Upload the whole folder (`index.html`, `style.css`, `js/`, `public/`) to any sta
 - `js/logic.js`: board model (matches, specials, gravity, shuffle). Pure logic with no DOM.
 - `js/audio.js`: synthesized sound effects (Web Audio).
 - `js/main.js`: rendering, input, game flow and screens.
+- `js/filter.js`: nickname/message validation and profanity filter.
+- `js/leaderboard.js`: leaderboard data layer. Set `API_URL` to connect a backend (see `LEADERBOARD-API.md`); empty means local test mode.
 - `public/`: tile images and logo.
 
 ## Rules
