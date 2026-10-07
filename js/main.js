@@ -30,6 +30,7 @@
   var lastAction = 0, hintIds = [];
   var cellPx = 48, dpr = 1;
   var gameId = 0; // bumps on every new game so stale async cascades stop
+  var gameStartedAt = 0, gameDuration = 0, submitted = false;
 
   // ---------- Storage ----------
   function loadBest(m) {
@@ -266,21 +267,51 @@
     setTimeout(function () { d.remove(); }, 950);
   }
 
-  function callout(text, big) {
+  var SLOGANS = [
+    'PROTI POLITIČNI POLICIJI',
+    'PROTI IZBRISU VOLIVCEV',
+    'PROTI UNIČENJU RTV',
+    'PROTI PRISILNEMU DELU',
+    'PROTI IZDAJALCEM',
+    'PROTI LAŽNIVCEM',
+    'PROTI PREVARANTOM',
+    'PROTI SVETOHLINCEM'
+  ];
+
+  // Returns `count` different slogans in random order.
+  function randomSlogans(count) {
+    var pool = SLOGANS.slice();
+    for (var i = pool.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+    }
+    return pool.slice(0, count);
+  }
+
+  function callout(text, big, slogans) {
     overlay.querySelectorAll('.callout').forEach(function (n) { n.remove(); });
+    var withSlogans = slogans && slogans.length;
     var d = document.createElement('div');
-    d.className = 'callout' + (big ? ' big' : '');
-    d.textContent = text;
+    d.className = 'callout' + (big ? ' big' : '') + (withSlogans ? ' with-slogan' : '');
+    var main = document.createElement('div');
+    main.textContent = text;
+    d.appendChild(main);
+    (slogans || []).forEach(function (text) {
+      var sub = document.createElement('div');
+      sub.className = 'slogan';
+      sub.textContent = text;
+      d.appendChild(sub);
+    });
     overlay.appendChild(d);
-    setTimeout(function () { d.remove(); }, 1150);
+    setTimeout(function () { d.remove(); }, withSlogans ? 1850 : 1150);
   }
 
   function comboCallout(combo) {
     if (combo < 3) return;
-    var labels = ['PROTI!', '2X PROTI!', '3X PROTI!', '4X PROTI!!!'];
-    var idx = Math.min(combo - 3, 3);
-    callout(labels[idx], idx === 3);
-    if (idx === 3) flash();
+    var n = combo - 2; // 1X, 2X, 3X, 4X, 5X ...
+    var big = n >= 4;
+    callout(n + 'X', big, randomSlogans(Math.min(n, 4)));
+    if (big) flash();
   }
 
   // ---------- Score & level ----------
@@ -330,12 +361,15 @@
     grid = Logic.generateBoard(N);
     renderAll();
     lastAction = performance.now();
+    gameStartedAt = lastAction;
+    submitted = false;
     state = 'playing';
   }
 
   function endGame() {
     if (state !== 'playing') return;
     state = 'over';
+    gameDuration = Math.round((performance.now() - gameStartedAt) / 1000);
     setSelected(null);
     clearHint();
     var best = loadBest(mode);
@@ -345,6 +379,7 @@
     $('final-best').textContent = fmt(best);
     $('new-record').hidden = !record;
     updateBestLine();
+    updateSubmitButton();
     Sfx.gameOver();
     setTimeout(function () { showScreen('over'); }, 400);
   }
@@ -470,7 +505,7 @@
         popup(0.6, N / 2 - 0.5, '+' + (CROSS_TIME_BONUS * crosses) + ' s', 'time');
       }
       if (effects.some(function (e) { return e.kind !== 'flame'; })) {
-        callout('4X PROTI!', true);
+        callout('4X PROTI!', true, randomSlogans(4));
         flash();
       } else {
         comboCallout(combo);
@@ -611,7 +646,7 @@
           timeLeft = 0;
           timeUp = true;
           setSelected(null);
-          callout('ČAS!', true);
+          callout('ZMANJKALO\nJE ČASA!', true);
           if (!busy) setTimeout(endGame, 900);
         }
         updateTimer();
@@ -626,6 +661,111 @@
     }
     drawFx();
     requestAnimationFrame(loop);
+  }
+
+  // ---------- Leaderboard ----------
+  var boardBack = 'menu';
+
+  // Only timed games go on the leaderboard (zen scores are unbounded).
+  function updateSubmitButton() {
+    var canSubmit = mode === 'timed' && score > 0 && !submitted;
+    $('btn-submit').hidden = !canSubmit;
+    $('btn-again').classList.toggle('primary', !canSubmit);
+  }
+
+  function openSubmitForm() {
+    var nick = '';
+    try { nick = localStorage.getItem('4xproti-nickname') || ''; } catch (e) {}
+    $('submit-score').textContent = fmt(score);
+    $('nick').value = nick;
+    $('msg').value = '';
+    $('msg-count').textContent = '0';
+    setFormError(null);
+    $('btn-send').disabled = false;
+    $('btn-send').textContent = 'Pošlji';
+    showScreen('submit');
+    (nick ? $('msg') : $('nick')).focus();
+  }
+
+  function setFormError(field, text) {
+    $('nick').classList.toggle('invalid', field === 'nickname');
+    $('msg').classList.toggle('invalid', field === 'message');
+    $('form-error').textContent = text || '';
+  }
+
+  async function sendScore(e) {
+    e.preventDefault();
+    if (submitted) return;
+    var check = TextFilter.validate($('nick').value, $('msg').value);
+    if (!check.ok) {
+      setFormError(check.field, check.error);
+      $(check.field === 'nickname' ? 'nick' : 'msg').focus();
+      return;
+    }
+    setFormError(null);
+    var btn = $('btn-send');
+    btn.disabled = true;
+    btn.textContent = 'Pošiljam…';
+    try {
+      var res = await Leaderboard.submit({
+        nickname: check.nickname,
+        message: check.message,
+        score: score,
+        level: level,
+        durationSeconds: gameDuration
+      });
+      submitted = true;
+      try { localStorage.setItem('4xproti-nickname', check.nickname); } catch (err) {}
+      updateSubmitButton();
+      showLeaderboard({ back: 'over', highlightId: res && res.id, rank: res && res.rank });
+    } catch (err) {
+      setFormError(null, err.serverMessage || 'Vpis ni uspel. Preveri povezavo in poskusi znova.');
+      btn.disabled = false;
+      btn.textContent = 'Pošlji';
+    }
+  }
+
+  async function showLeaderboard(opts) {
+    boardBack = opts.back;
+    var list = $('board-list'), status = $('board-status'), rankEl = $('board-rank');
+    list.innerHTML = '';
+    rankEl.hidden = !opts.rank;
+    if (opts.rank) rankEl.textContent = 'Si na ' + opts.rank + '. mestu!';
+    $('board-local').hidden = !Leaderboard.isLocal();
+    status.textContent = 'Nalaganje…';
+    showScreen('board');
+    try {
+      var rows = await Leaderboard.top(10);
+      status.textContent = rows.length ? '' : 'Lestvica je še prazna. Bodi prvi!';
+      rows.forEach(function (row, i) {
+        var li = document.createElement('li');
+        if (opts.highlightId && row.id === opts.highlightId) li.className = 'me';
+        var pos = document.createElement('span');
+        pos.className = 'pos';
+        pos.textContent = (i + 1) + '.';
+        var who = document.createElement('div');
+        who.className = 'who';
+        var nick = document.createElement('span');
+        nick.className = 'nick';
+        nick.textContent = row.nickname;
+        who.appendChild(nick);
+        if (row.message) {
+          var msg = document.createElement('span');
+          msg.className = 'msg';
+          msg.textContent = row.message;
+          who.appendChild(msg);
+        }
+        var pts = document.createElement('span');
+        pts.className = 'pts';
+        pts.textContent = fmt(row.score);
+        li.appendChild(pos);
+        li.appendChild(who);
+        li.appendChild(pts);
+        list.appendChild(li);
+      });
+    } catch (err) {
+      status.textContent = 'Lestvice ni bilo mogoče naložiti.';
+    }
   }
 
   // ---------- UI wiring ----------
@@ -653,9 +793,15 @@
   $('btn-zen').addEventListener('click', function () { startGame('zen'); });
   $('btn-again').addEventListener('click', function () { startGame(mode); });
   $('btn-menu').addEventListener('click', function () { state = 'menu'; showScreen('menu'); });
+  $('btn-leaderboard').addEventListener('click', function () { showLeaderboard({ back: 'menu' }); });
+  $('btn-submit').addEventListener('click', openSubmitForm);
+  $('btn-cancel').addEventListener('click', function () { showScreen('over'); });
+  $('btn-board-back').addEventListener('click', function () { showScreen(boardBack); });
+  $('submit-form').addEventListener('submit', sendScore);
+  $('msg').addEventListener('input', function () { $('msg-count').textContent = this.value.length; });
   $('btn-quit').addEventListener('click', quit);
   $('btn-share').addEventListener('click', async function () {
-    var text = 'Moj rezultat v igri 4X PROTI: ' + fmt(score) + ' točk! 11. oktobra — 4X PROTI.';
+    var text = 'Moj rezultat v igri 4X PROTI: ' + fmt(score) + ' točk! V nedeljo glasuj 4X PROTI.';
     var url = location.href.split('#')[0];
     if (navigator.share) {
       try { await navigator.share({ title: '4X PROTI', text: text, url: url }); } catch (e) {}
