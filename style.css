@@ -133,6 +133,17 @@ body {
 .tagline b { color: var(--orange); font-weight: normal; }
 .best-line { font-size: 16px; color: var(--muted); letter-spacing: 0.06em; }
 .best-line span { color: var(--orange); }
+/* Spacer + auto margin keep the content centred with the credits pinned low. */
+#screen-menu::before, #screen-board::before { content: ''; margin-bottom: auto; }
+.credits {
+  margin-top: auto;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+.credits a { color: var(--orange); text-decoration: none; }
+.credits a:hover, .credits a:focus-visible { text-decoration: underline; }
 
 /* ---------- HUD ---------- */
 .hud {
