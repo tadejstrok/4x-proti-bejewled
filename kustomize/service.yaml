@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: igraj-4xproti
+spec:
+  selector:
+    app: igraj-4xproti
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080

@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: proti-4x
+resources:
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+images:
+  - name: igraj-4xproti
+    newName: rg.fr-par.scw.cloud/djnd/igraj-4xproti
+    newTag: 'a2dfd650cd2fb7bfc7957e5dab09f21fc65d47ae-dirty-20261008093532'

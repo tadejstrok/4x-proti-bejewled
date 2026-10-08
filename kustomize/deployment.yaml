@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: igraj-4xproti
+  labels:
+    app: igraj-4xproti
+spec:
+  # SQLite on a ReadWriteOnce volume: exactly one pod, and the old one must stop
+  # before the new one starts.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: igraj-4xproti
+  template:
+    metadata:
+      labels:
+        app: igraj-4xproti
+    spec:
+      securityContext:
+        fsGroup: 1000
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: igraj-4xproti-data
+      containers:
+        - name: igraj-4xproti
+          image: igraj-4xproti
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: igraj-4xproti-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 500m
