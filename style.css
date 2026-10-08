@@ -87,10 +87,10 @@ body {
   transition: transform 0.08s, box-shadow 0.08s;
 }
 .btn.primary { background: var(--orange); color: var(--black); box-shadow: 6px 6px 0 var(--ink); }
-.btn.ghost { border-color: var(--muted); color: var(--muted); box-shadow: none; min-width: 120px; }
+.btn.ghost { border-color: var(--ink); color: var(--ink); box-shadow: none; min-width: 120px; }
 .btn:hover:not(:disabled) { transform: translate(-2px, -2px); box-shadow: 8px 8px 0 currentColor; }
 .btn.primary:hover:not(:disabled) { box-shadow: 8px 8px 0 var(--ink); }
-.btn.ghost:hover { box-shadow: none; color: var(--ink); border-color: var(--ink); }
+.btn.ghost:hover { box-shadow: none; color: var(--orange); border-color: var(--orange); }
 .btn:active:not(:disabled) { transform: translate(4px, 4px); box-shadow: 2px 2px 0 currentColor; }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn:focus-visible, .icon-btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
