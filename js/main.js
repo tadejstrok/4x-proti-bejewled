@@ -776,10 +776,41 @@
     }
   }
 
+  function boardRow(row, rank, highlightId) {
+    var li = document.createElement('li');
+    if (highlightId && row.id === highlightId) li.className = 'me';
+    var pos = document.createElement('span');
+    pos.className = 'pos';
+    pos.textContent = rank + '.';
+    var who = document.createElement('div');
+    who.className = 'who';
+    var nick = document.createElement('span');
+    nick.className = 'nick';
+    nick.textContent = row.nickname;
+    who.appendChild(nick);
+    if (SHOW_MESSAGES && row.message) {
+      var msg = document.createElement('span');
+      msg.className = 'msg';
+      msg.textContent = row.message;
+      who.appendChild(msg);
+    }
+    var pts = document.createElement('span');
+    pts.className = 'pts';
+    pts.textContent = fmt(row.score);
+    li.appendChild(pos);
+    li.appendChild(who);
+    li.appendChild(pts);
+    return li;
+  }
+
+  var TOP_N = 5;
+
   async function showLeaderboard(opts) {
     boardBack = opts.back;
-    var list = $('board-list'), status = $('board-status'), rankEl = $('board-rank');
+    var list = $('board-list'), rest = $('board-rest'), status = $('board-status'), rankEl = $('board-rank');
     list.innerHTML = '';
+    rest.innerHTML = '';
+    $('board-rest-title').hidden = true;
     rankEl.hidden = !opts.rank;
     if (opts.rank) rankEl.textContent = 'Si na ' + opts.rank + '. mestu!';
     $('board-local').hidden = !Leaderboard.isLocal();
@@ -787,37 +818,67 @@
     showScreen('board');
     startTips();
     try {
-      var rows = await Leaderboard.top(10);
+      // Below the top 5, show the player with two entries above and below them under "Ostali",
+      // without repeating anyone who is already in the top 5.
+      var rank = opts.rank || 0;
+      var from = Math.max(TOP_N, rank - 3); // 0-based index of the first "Ostali" row
+      var res = await Promise.all([
+        Leaderboard.top(TOP_N),
+        rank > TOP_N ? Leaderboard.top(rank + 2 - from, from) : []
+      ]);
+      var rows = res[0], near = res[1];
       status.textContent = rows.length ? '' : 'Lestvica je še prazna. Bodi prvi!';
-      rows.forEach(function (row, i) {
-        var li = document.createElement('li');
-        if (opts.highlightId && row.id === opts.highlightId) li.className = 'me';
-        var pos = document.createElement('span');
-        pos.className = 'pos';
-        pos.textContent = (i + 1) + '.';
-        var who = document.createElement('div');
-        who.className = 'who';
-        var nick = document.createElement('span');
-        nick.className = 'nick';
-        nick.textContent = row.nickname;
-        who.appendChild(nick);
-        if (SHOW_MESSAGES && row.message) {
-          var msg = document.createElement('span');
-          msg.className = 'msg';
-          msg.textContent = row.message;
-          who.appendChild(msg);
-        }
-        var pts = document.createElement('span');
-        pts.className = 'pts';
-        pts.textContent = fmt(row.score);
-        li.appendChild(pos);
-        li.appendChild(who);
-        li.appendChild(pts);
-        list.appendChild(li);
-      });
+      rows.forEach(function (row, i) { list.appendChild(boardRow(row, i + 1, opts.highlightId)); });
+      near.forEach(function (row, i) { rest.appendChild(boardRow(row, from + i + 1, opts.highlightId)); });
+      $('board-rest-title').hidden = !near.length;
     } catch (err) {
       status.textContent = 'Lestvice ni bilo mogoče naložiti.';
     }
+  }
+
+  // Full leaderboard, opened through the #lestvica link and loaded a page at a time.
+  var FULL_PAGE = 50;
+  var fullBack = 'menu', fullLoaded = 0, fullFromApp = false;
+
+  async function loadFullPage() {
+    var status = $('full-status'), more = $('btn-full-more');
+    more.hidden = true;
+    status.textContent = 'Nalaganje…';
+    try {
+      var rows = await Leaderboard.top(FULL_PAGE, fullLoaded);
+      rows.forEach(function (row, i) { $('full-list').appendChild(boardRow(row, fullLoaded + i + 1)); });
+      fullLoaded += rows.length;
+      status.textContent = fullLoaded ? '' : 'Lestvica je še prazna. Bodi prvi!';
+      more.hidden = rows.length < FULL_PAGE;
+    } catch (err) {
+      status.textContent = 'Lestvice ni bilo mogoče naložiti.';
+      more.hidden = false;
+    }
+  }
+
+  function showFullBoard() {
+    var current = document.querySelector('.screen.active');
+    fullBack = current && current.id !== 'screen-game' ? current.id.replace('screen-', '') : 'menu';
+    $('full-list').innerHTML = '';
+    fullLoaded = 0;
+    showScreen('full');
+    loadFullPage();
+  }
+
+  function routeHash() {
+    var onFull = $('screen-full').classList.contains('active');
+    if (location.hash === '#lestvica') { if (!onFull) showFullBoard(); }
+    else if (onFull) {
+      showScreen(fullBack);
+      if (fullBack === 'board') startTips();
+    }
+  }
+
+  function closeFullBoard() {
+    if (fullFromApp) { history.back(); return; }
+    // Opened straight from a link: there is no in-app history to go back to.
+    history.replaceState(null, '', location.pathname + location.search);
+    showScreen(fullBack);
   }
 
   // ---------- UI wiring ----------
@@ -873,6 +934,10 @@
   $('btn-cancel').addEventListener('click', function () { showScreen('over'); });
   $('btn-board-back').addEventListener('click', function () { showScreen(boardBack); });
   // Tapping the tip skips ahead, like on a loading screen.
+  $('board-all').addEventListener('click', function () { fullFromApp = true; });
+  $('btn-full-more').addEventListener('click', loadFullPage);
+  $('btn-full-back').addEventListener('click', closeFullBoard);
+  window.addEventListener('hashchange', routeHash);
   $('board-tip').addEventListener('click', function () { if (tipTimer) startTips(); });
   $('submit-form').addEventListener('submit', sendScore);
   $('msg').addEventListener('input', function () { $('msg-count').textContent = this.value.length; });
@@ -918,6 +983,7 @@
     };
   }
 
+  routeHash();
   updateBestLine();
   updateMuteButtons();
   updateVoiceButtons();

@@ -65,6 +65,12 @@ test('submit and rank, ties go to the earlier entry', async () => {
   assert.deepStrictEqual(Object.keys(rows[0]).sort(), ['createdAt', 'id', 'message', 'nickname', 'score']);
 });
 
+test('offset pages through the ranking', async () => {
+  const all = await (await fetch(BASE + '/api/scores?limit=10')).json();
+  const page = await (await fetch(BASE + '/api/scores?limit=2&offset=1')).json();
+  assert.deepStrictEqual(page.map((r) => r.id), all.slice(1, 3).map((r) => r.id));
+});
+
 test('rejects bad text with the filter message', async () => {
   const r = await post(entry({ nickname: 'kur4c' }), '10.0.1.1');
   assert.strictEqual(r.status, 400);

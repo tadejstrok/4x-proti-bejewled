@@ -8,9 +8,9 @@ Strežnik je [`server/server.js`](server/server.js) in teče na isti domeni kot 
 
 Vsi odgovori so JSON. Poti spodaj so relativne na `/api`.
 
-### `GET /scores?limit=10`
+### `GET /scores?limit=10&offset=0`
 
-Vrne najboljše rezultate, urejene od najboljšega navzdol. Pri enakem številu točk je prej tisti, ki je bil vpisan prej.
+Vrne najboljše rezultate, urejene od najboljšega navzdol. Pri enakem številu točk je prej tisti, ki je bil vpisan prej. `limit` je največ 100, `offset` preskoči toliko prvih vpisov (za listanje in za prikaz igralcev okoli tvoje uvrstitve).
 
 ```json
 [
@@ -50,7 +50,7 @@ Uspešen odgovor (`200`/`201`):
 { "id": "abc123", "rank": 14, "total": 230 }
 ```
 
-`rank` je uvrstitev tega vpisa na celotni lestvici. Igra ga izpiše kot »Si na 14. mestu!« in vpis obarva, če je med najboljšimi 10.
+`rank` je uvrstitev tega vpisa na celotni lestvici. Igra ga izpiše kot »Si na 14. mestu!« in vpis obarva: med najboljšimi 5 ali pod »Ostali« skupaj z dvema igralcema nad in pod njim.
 
 Napaka (`4xx`):
 

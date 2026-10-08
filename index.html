@@ -117,23 +117,39 @@
   <!-- Leaderboard -->
   <section id="screen-board" class="screen">
     <div class="panel">
-      <h2 class="screen-title">Lestvica</h2>
+      <h2 class="screen-title">Top 5</h2>
       <p id="board-rank" class="board-rank" hidden></p>
+      <ol id="board-list" class="board-list"></ol>
+      <p id="board-status" class="board-status"></p>
+      <p id="board-local" class="form-note" hidden>Testna lestvica: vpisi so shranjeni samo na tej napravi.</p>
       <button id="board-tip" class="tip" type="button">
         <span class="tip-label">Nasvet</span>
         <span id="tip-text" class="tip-text"></span>
       </button>
-      <ol id="board-list" class="board-list"></ol>
-      <p id="board-status" class="board-status"></p>
-      <p id="board-local" class="form-note" hidden>Testna lestvica: vpisi so shranjeni samo na tej napravi.</p>
-      <div class="buttons">
-        <button id="btn-board-back" class="btn">Nazaj</button>
+      <h2 id="board-rest-title" class="screen-title" hidden>Ostali</h2>
+      <ol id="board-rest" class="board-list board-rest"></ol>
+      <div class="board-links">
+        <button id="btn-board-back" class="board-all" type="button">← Nazaj</button>
+        <a id="board-all" class="board-all" href="#lestvica">Celotna lestvica →</a>
       </div>
     </div>
     <footer class="credits">
       Pripravil <a href="https://danesjenovdan.si" target="_blank" rel="noopener">Danes je nov dan</a>
       v sklopu kampanje <a href="https://4xproti.si" target="_blank" rel="noopener">4xproti.si</a>
     </footer>
+  </section>
+
+  <!-- Full leaderboard, reachable at #lestvica -->
+  <section id="screen-full" class="screen">
+    <div class="panel">
+      <h2 class="screen-title">Lestvica</h2>
+      <ol id="full-list" class="board-list"></ol>
+      <p id="full-status" class="board-status"></p>
+      <div class="buttons">
+        <button id="btn-full-more" class="btn" hidden>Naloži več</button>
+        <button id="btn-full-back" class="btn ghost">Nazaj</button>
+      </div>
+    </div>
   </section>
 
   <div id="flash" aria-hidden="true"></div>

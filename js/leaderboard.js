@@ -48,11 +48,13 @@
     return body;
   }
 
-  // Returns [{ id, nickname, message, score, createdAt }] sorted best first.
-  async function top(limit) {
+  // Returns [{ id, nickname, message, score, createdAt }] sorted best first,
+  // skipping the first `offset` entries.
+  async function top(limit, offset) {
     limit = limit || 10;
-    if (!API_URL) return readLocal().sort(byScore).slice(0, limit);
-    return request('/scores?limit=' + limit);
+    offset = offset || 0;
+    if (!API_URL) return readLocal().sort(byScore).slice(offset, offset + limit);
+    return request('/scores?limit=' + limit + '&offset=' + offset);
   }
 
   // entry: { nickname, message, score, level, durationSeconds }

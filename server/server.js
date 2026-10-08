@@ -49,7 +49,7 @@ if (legacy.length) {
 
 const q = {
   top: db.prepare(`SELECT id, nickname, message, score, created_at AS createdAt FROM scores
-                   WHERE hidden = 0 ORDER BY score DESC, created_at, id LIMIT ?`),
+                   WHERE hidden = 0 ORDER BY score DESC, created_at, id LIMIT ? OFFSET ?`),
   insert: db.prepare(`INSERT INTO scores (id, nickname, message, score, level, duration, created_at)
                       VALUES (?, ?, ?, ?, ?, ?, ?)`),
   ahead: db.prepare(`SELECT COUNT(*) AS n FROM scores WHERE hidden = 0
@@ -148,7 +148,8 @@ async function postScore(req, res) {
 
 function getScores(url, res) {
   const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit'), 10) || 10, 1), 100);
-  json(res, 200, q.top.all(limit));
+  const offset = Math.min(Math.max(parseInt(url.searchParams.get('offset'), 10) || 0, 0), 1e6);
+  json(res, 200, q.top.all(limit, offset));
 }
 
 function isAdmin(req) {
