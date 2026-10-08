@@ -1,2 +1,8 @@
 .claude/
 .DS_Store
+scores.db
+scores.db-*
+secrets.yaml
+
+docker-compose.claude.yaml
+Dockerfile.claude
