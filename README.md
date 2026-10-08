@@ -38,7 +38,7 @@ kubectl -n proti-4x exec -it deploy/igraj-4xproti -- sqlite3 /data/scores.db
 ```
 
 ```sql
-SELECT id, nickname, message, score, ip, created_at FROM scores ORDER BY created_at DESC LIMIT 20;
+SELECT id, nickname, message, score, created_at FROM scores ORDER BY created_at DESC LIMIT 20;
 UPDATE scores SET hidden = 1 WHERE id = '...';   -- hide (0 to restore)
 DELETE FROM scores WHERE id = '...';             -- delete for good
 ```

@@ -120,7 +120,7 @@ test('admin edits, hides and restores an entry', async () => {
   const list = await admin('/scores?q=Original');
   assert.strictEqual(list.status, 200);
   assert.strictEqual(list.body.length, 1);
-  assert.strictEqual(list.body[0].ip, '10.0.5.1');
+  assert.ok(!('ip' in list.body[0]));
 
   const edit = await admin('/scores/' + created.id, { method: 'PATCH', body: JSON.stringify({ nickname: '  Popravljeno ', message: '' }) });
   assert.deepStrictEqual(edit.body, { id: created.id, nickname: 'Popravljeno', message: '', hidden: 0 });

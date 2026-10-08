@@ -31,8 +31,6 @@ db.exec(`
     score      INTEGER NOT NULL,
     level      INTEGER NOT NULL,
     duration   INTEGER NOT NULL,
-    client_id  TEXT NOT NULL,
-    ip         TEXT NOT NULL,
     created_at TEXT NOT NULL,
     hidden     INTEGER NOT NULL DEFAULT 0
   );
@@ -40,16 +38,24 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS scores_recent ON scores (created_at);
 `);
 
+// Older databases stored the IP and clientId with each entry. Drop them and rewrite the
+// file so they don't linger in free pages.
+const legacy = db.prepare(`SELECT name FROM pragma_table_info('scores') WHERE name IN ('ip', 'client_id')`).all();
+if (legacy.length) {
+  for (const { name } of legacy) db.exec(`ALTER TABLE scores DROP COLUMN ${name}`);
+  db.exec('VACUUM');
+  console.log('removed stored IPs and client ids');
+}
+
 const q = {
   top: db.prepare(`SELECT id, nickname, message, score, created_at AS createdAt FROM scores
                    WHERE hidden = 0 ORDER BY score DESC, created_at, id LIMIT ?`),
-  recent: db.prepare(`SELECT COUNT(*) AS n FROM scores WHERE created_at > ? AND (client_id = ? OR ip = ?)`),
-  insert: db.prepare(`INSERT INTO scores (id, nickname, message, score, level, duration, client_id, ip, created_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+  insert: db.prepare(`INSERT INTO scores (id, nickname, message, score, level, duration, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?)`),
   ahead: db.prepare(`SELECT COUNT(*) AS n FROM scores WHERE hidden = 0
                      AND (score > ? OR (score = ? AND (created_at < ? OR (created_at = ? AND id < ?))))`),
   total: db.prepare(`SELECT COUNT(*) AS n FROM scores WHERE hidden = 0`),
-  adminList: db.prepare(`SELECT id, nickname, message, score, level, duration AS durationSeconds, ip,
+  adminList: db.prepare(`SELECT id, nickname, message, score, level, duration AS durationSeconds,
                          created_at AS createdAt, hidden FROM scores
                          WHERE ?1 = '' OR nickname LIKE '%' || ?1 || '%' OR message LIKE '%' || ?1 || '%'
                          ORDER BY CASE WHEN ?2 = 'top' THEN -score END, created_at DESC LIMIT 500`),
@@ -67,6 +73,31 @@ function clientIp(req) {
   // Traefik sets X-Real-Ip to the address it saw the request come from.
   return String(req.headers['x-real-ip'] || req.socket.remoteAddress || '');
 }
+
+// Rate limiting lives only in memory: salted hashes of the IP and clientId, kept for an
+// hour. Nothing identifying a player is written to the database or the logs.
+const RATE_SALT = crypto.randomBytes(16);
+const recent = new Map(); // hashed key -> submission timestamps within the last hour
+
+function rateKey(kind, value) {
+  return crypto.createHmac('sha256', RATE_SALT).update(kind + ':' + value).digest('base64url');
+}
+
+function rateLimited(keys) {
+  const hourAgo = Date.now() - 3600e3;
+  const counts = keys.map((k) => (recent.get(k) || []).filter((t) => t > hourAgo));
+  if (counts.some((ts) => ts.length >= RATE_LIMIT)) return true;
+  keys.forEach((k, i) => recent.set(k, counts[i].concat(Date.now())));
+  return false;
+}
+
+setInterval(() => {
+  const hourAgo = Date.now() - 3600e3;
+  for (const [k, ts] of recent) {
+    const keep = ts.filter((t) => t > hourAgo);
+    if (keep.length) recent.set(k, keep); else recent.delete(k);
+  }
+}, 600e3).unref();
 
 function readBody(req, max) {
   return new Promise((resolve, reject) => {
@@ -102,16 +133,15 @@ async function postScore(req, res) {
     return json(res, 400, { error: 'Rezultat ni veljaven.' });
   }
 
-  const clientId = String(body.clientId || '').slice(0, 64) || 'anon';
-  const ip = clientIp(req);
-  const hourAgo = new Date(Date.now() - 3600e3).toISOString();
-  if (q.recent.get(hourAgo, clientId, ip).n >= RATE_LIMIT) {
+  const keys = [rateKey('ip', clientIp(req))];
+  if (body.clientId) keys.push(rateKey('client', String(body.clientId).slice(0, 64)));
+  if (rateLimited(keys)) {
     return json(res, 429, { error: 'Preveč vpisov. Poskusi znova čez eno uro.' });
   }
 
   const id = crypto.randomBytes(8).toString('base64url');
   const createdAt = new Date().toISOString();
-  q.insert.run(id, check.nickname, check.message, score, level, durationSeconds, clientId, ip, createdAt);
+  q.insert.run(id, check.nickname, check.message, score, level, durationSeconds, createdAt);
   const rank = q.ahead.get(score, score, createdAt, createdAt, id).n + 1;
   json(res, 201, { id, rank, total: q.total.get().n });
 }

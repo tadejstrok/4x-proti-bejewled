@@ -73,4 +73,4 @@ Preverjanje v brskalniku je samo za udobje igralca, saj ga lahko kdorkoli zaobid
 
 ## Zasebnost
 
-Shranjujejo se samo vzdevek, sporočilo, točke in čas vpisa. IP in `clientId` uporabljaj samo za omejevanje vpisov in ju ne prikazuj javno.
+Shranjujejo se samo vzdevek, sporočilo, točke, stopnja, trajanje igre in čas vpisa. IP in `clientId` se uporabljata samo za omejevanje vpisov: strežnik ju hrani le v pomnilniku, kot zgoščeni vrednosti s soljo, ki se ob vsakem zagonu zamenja, in ju po eni uri pozabi. Ne zapiše ju v bazo ne v dnevnik.
