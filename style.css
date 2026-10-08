@@ -504,6 +504,41 @@ body {
 .board-status { font: 15px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--muted); }
 .board-status:empty { display: none; }
 
+.tip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 0 14px 12px 0;
+  font-family: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--black);
+  border: 4px solid var(--orange);
+  box-shadow: 6px 6px 0 var(--orange);
+  margin-bottom: 6px; /* room for the shadow above the list */
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tip:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+/* Tab in the top-left corner, flush with the frame. */
+.tip-label {
+  background: var(--orange);
+  color: var(--black);
+  padding: 0 10px 3px 8px;
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.tip-text {
+  min-height: 4.2em; /* three lines, so the list below doesn't jump between tips */
+  padding-left: 14px;
+  font: 15px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.tip-text.in { animation: tipIn 0.35s ease-out; }
+@keyframes tipIn { from { opacity: 0; transform: translateY(6px); } }
+
 /* ---------- Flash & toast ---------- */
 #flash {
   position: fixed;
@@ -543,5 +578,6 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .bg, .bob, .badge, .stat.low, .face.hint, .face.cross, .tile.flame::before { animation: none !important; }
   .board-wrap.shake { animation: none; }
+  .tip-text.in { animation: none; }
   #flash.on { animation: none; }
 }

@@ -53,6 +53,7 @@
     document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
     $('screen-' + name).classList.add('active');
     if (name === 'game') resize();
+    if (name !== 'board') stopTips();
   }
 
   function toast(text) {
@@ -280,14 +281,18 @@
     'PROTI SVETOHLINCEM'
   ];
 
-  // Returns `count` different slogans in random order.
-  function randomSlogans(count) {
-    var pool = SLOGANS.slice();
+  function shuffled(list) {
+    var pool = list.slice();
     for (var i = pool.length - 1; i > 0; i--) {
       var j = Math.floor(Math.random() * (i + 1));
       var tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
     }
-    return pool.slice(0, count);
+    return pool;
+  }
+
+  // Returns `count` different slogans in random order.
+  function randomSlogans(count) {
+    return shuffled(SLOGANS).slice(0, count);
   }
 
   function callout(text, big, slogans) {
@@ -670,6 +675,48 @@
   // ---------- Leaderboard ----------
   var boardBack = 'menu';
 
+  // Loading-screen style tips under the leaderboard: mostly nudges to vote, plus a few game tips.
+  var TIPS = [
+    'Referendum je v nedeljo, 11. oktobra. Tega "levela" ne moreš ponoviti.',
+    'Volišča so odprta od 7. do 19. ure. Dovolj časa za brunch s prijateljicami, sprehod in 4xPROTI.',
+    'Ne pozabi osebnega dokumenta. Brez njega na volišču ne gre. Spomni tudi druge.',
+    'Zakon pade, če PROTI glasuje večina in hkrati vsaj petina vseh volivcev. Vsak glas šteje v ta prag. Poskrbi, da tvoji znanci in družina glasujejo.',
+    'Rekord na lestvici je lep. Glas na referendumu je lepši (še posebej tisti od prijatelja).',
+    'Najmočnejša kombinacija: ti + prijatelji + volišče. Povabi jih s seboj.',
+    'Obkrožiti PROTI štirikrat vzame manj časa kot ena igra v načinu Odštevanje.',
+    'Pokliči mamo, brata, sosedo. Vsak dodaten glas dvigne kombo.',
+    'Kdor v nedeljo ostane doma, ga ne šteje nobena lestvica.',
+    'Deli igro s prijatelji in jih spomni, da naj v nedeljo glasujejo 4xPROTI.',
+    'Glasovanje je igra, kjer šteje vsaka poteza.',
+    '4 v vrsto ustvari ploščico 4xPROTI. Zamenjaj jo s sosedo in počisti celo vrstico in stolpec.',
+    '5 v vrsto ali oblika L/T ustvari gorečo ploščico, ki eksplodira v kvadratu 3 × 3.',
+    'Zamenjaj dve posebni ploščici med sabo in združi njuni moči.',
+    'V načinu Odštevanje ti vsaka 4X PROTI bomba prinese +4 sekunde.',
+    'Ujemanja nizko na plošči sprožijo več padcev in višji večkratnik.',
+  ];
+  var TIP_INTERVAL = 7000;
+  var tipDeck = [], tipTimer = null;
+
+  function nextTip() {
+    if (!tipDeck.length) tipDeck = shuffled(TIPS);
+    var el = $('tip-text');
+    el.classList.remove('in');
+    void el.offsetWidth;
+    el.textContent = tipDeck.pop();
+    el.classList.add('in');
+  }
+
+  function startTips() {
+    stopTips();
+    nextTip();
+    tipTimer = setInterval(nextTip, TIP_INTERVAL);
+  }
+
+  function stopTips() {
+    clearInterval(tipTimer);
+    tipTimer = null;
+  }
+
   // Only timed games go on the leaderboard (zen scores are unbounded).
   function updateSubmitButton() {
     var canSubmit = mode === 'timed' && score > 0 && !submitted;
@@ -738,6 +785,7 @@
     $('board-local').hidden = !Leaderboard.isLocal();
     status.textContent = 'Nalaganje…';
     showScreen('board');
+    startTips();
     try {
       var rows = await Leaderboard.top(10);
       status.textContent = rows.length ? '' : 'Lestvica je še prazna. Bodi prvi!';
@@ -824,6 +872,8 @@
   $('btn-submit').addEventListener('click', openSubmitForm);
   $('btn-cancel').addEventListener('click', function () { showScreen('over'); });
   $('btn-board-back').addEventListener('click', function () { showScreen(boardBack); });
+  // Tapping the tip skips ahead, like on a loading screen.
+  $('board-tip').addEventListener('click', function () { if (tipTimer) startTips(); });
   $('submit-form').addEventListener('submit', sendScore);
   $('msg').addEventListener('input', function () { $('msg-count').textContent = this.value.length; });
   $('btn-quit').addEventListener('click', quit);
