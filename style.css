@@ -399,6 +399,10 @@ body {
   text-transform: uppercase;
   box-shadow: 6px 6px 0 var(--ink);
 }
+.strip { text-decoration: none; cursor: pointer; transition: transform 0.08s, box-shadow 0.08s; }
+.strip:hover { transform: translate(-2px, -2px); box-shadow: 8px 8px 0 var(--ink); }
+.strip:active { transform: translate(4px, 4px); box-shadow: 2px 2px 0 var(--ink); }
+.strip:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 .strip img { width: clamp(72px, 20vw, 110px); height: auto; aspect-ratio: 1; display: block; flex: 0 0 auto; }
 
 /* Submit button, banner and the other buttons share one column width. */
