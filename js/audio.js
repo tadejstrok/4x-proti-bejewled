@@ -4,7 +4,7 @@
 
   var ctx = null, master = null, muted = false;
   var VOLUME = 0.5;
-  var VOICE_GAIN = 1.6;
+  var VOICE_GAIN = 0.3; // clips in public/ are normalized to -16 LUFS
 
   // Voice clips played at random on bonuses (special tile blasts, combos).
   var VOICE_FILES = [
