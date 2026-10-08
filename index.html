@@ -79,10 +79,10 @@
       <form id="submit-form" class="form" novalidate>
         <label for="nick">Vzdevek</label>
         <input id="nick" name="nickname" type="text" maxlength="20" autocomplete="nickname" autocapitalize="off" spellcheck="false" required>
-        <label for="msg">Sporočilo <small>(neobvezno)</small></label>
-        <textarea id="msg" name="message" maxlength="100" rows="3"></textarea>
-        <div class="counter"><span id="msg-count">0</span>/100</div>
-        <p class="form-note">Vzdevek in sporočilo bosta javno vidna na lestvici.</p>
+        <label for="msg" class="msg-field">Sporočilo <small>(neobvezno)</small></label>
+        <textarea id="msg" class="msg-field" name="message" maxlength="100" rows="3"></textarea>
+        <div class="counter msg-field"><span id="msg-count">0</span>/100</div>
+        <p id="form-note" class="form-note">Vzdevek in sporočilo bosta javno vidna na lestvici.</p>
         <p id="form-error" class="form-error" role="alert"></p>
         <div class="buttons">
           <button type="submit" id="btn-send" class="btn primary">Pošlji</button>

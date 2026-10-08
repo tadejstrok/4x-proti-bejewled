@@ -13,6 +13,8 @@
   var TIMED_SECONDS = 90;
   var CROSS_TIME_BONUS = 4;
   var HINT_DELAY = 5000;
+  // Leaderboard messages are off for now: no input on the submit form, not shown on the board.
+  var SHOW_MESSAGES = false;
   var BOUNCE = 'cubic-bezier(.34, 1.25, .64, 1)';
   var REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -684,7 +686,7 @@
     $('btn-send').disabled = false;
     $('btn-send').textContent = 'Pošlji';
     showScreen('submit');
-    (nick ? $('msg') : $('nick')).focus();
+    (nick && SHOW_MESSAGES ? $('msg') : $('nick')).focus();
   }
 
   function setFormError(field, text) {
@@ -749,7 +751,7 @@
         nick.className = 'nick';
         nick.textContent = row.nickname;
         who.appendChild(nick);
-        if (row.message) {
+        if (SHOW_MESSAGES && row.message) {
           var msg = document.createElement('span');
           msg.className = 'msg';
           msg.textContent = row.message;
@@ -769,6 +771,11 @@
   }
 
   // ---------- UI wiring ----------
+  if (!SHOW_MESSAGES) {
+    document.querySelectorAll('.msg-field').forEach(function (el) { el.hidden = true; });
+    $('form-note').textContent = 'Vzdevek bo javno viden na lestvici.';
+  }
+
   function updateBestLine() {
     $('best-timed').textContent = fmt(loadBest('timed'));
     $('best-zen').textContent = fmt(loadBest('zen'));
