@@ -3,9 +3,10 @@
 (function (global) {
   'use strict';
 
-  // Backend base URL, e.g. 'https://api.example.si/4xproti'.
-  // Leave empty for local test mode (entries are stored only in this browser).
-  var API_URL = '';
+  // Backend base URL. The API is served by server/server.js next to the game, so a
+  // relative path is enough. Empty means local test mode (entries stay in this browser),
+  // which is used when index.html is opened straight from disk.
+  var API_URL = /^https?:$/.test(location.protocol) ? 'api' : '';
 
   var LOCAL_KEY = '4xproti-local-leaderboard';
 

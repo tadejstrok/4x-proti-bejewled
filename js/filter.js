@@ -65,4 +65,4 @@
     isOffensive: isOffensive,
     validate: validate
   };
-})(window);
+})(typeof window !== 'undefined' ? window : globalThis);

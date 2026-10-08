@@ -1,22 +1,12 @@
 # Lestvica: navodila za backend
 
-Igra je statična stran in že ima celoten vmesnik za lestvico (obrazec in seznam). Manjka le strežnik, ki shranjuje vpise.
+Strežnik je [`server/server.js`](server/server.js) in teče na isti domeni kot igra, zato je API dosegljiv na relativni poti `api/` (CORS ni potreben). Navodila za zagon, namestitev in moderacijo so v [`README.md`](README.md).
 
-Dokler strežnik ni povezan, igra deluje v **testnem načinu**: vpisi se shranjujejo samo v brskalnik igralca (`localStorage`).
-
-## Povezava
-
-V [`js/leaderboard.js`](js/leaderboard.js) nastavi:
-
-```js
-var API_URL = 'https://api.example.si/4xproti';
-```
-
-Drugih sprememb v igri ni treba narediti.
+Če igro odpreš neposredno z diska (`file://`), deluje v **testnem načinu**: vpisi se shranjujejo samo v brskalnik igralca (`localStorage`).
 
 ## Endpointi
 
-Vsi odgovori so JSON. Strežnik mora dovoliti CORS za domeno, kjer teče igra (npr. `https://<uporabnik>.github.io`).
+Vsi odgovori so JSON. Poti spodaj so relativne na `/api`.
 
 ### `GET /scores?limit=10`
 
@@ -70,9 +60,9 @@ Napaka (`4xx`):
 
 Besedilo v `error` se prikaže igralcu dobesedno, zato naj bo v slovenščini.
 
-## Kaj mora preveriti strežnik
+## Kaj preveri strežnik
 
-Preverjanje v brskalniku je samo za udobje igralca, saj ga lahko kdorkoli zaobide. Strežnik mora zato sam ponoviti naslednje:
+Preverjanje v brskalniku je samo za udobje igralca, saj ga lahko kdorkoli zaobide. Strežnik zato sam ponovi naslednje:
 
 1. **Dolžine in znake** za `nickname` in `message`, kot v tabeli zgoraj. Presledke na začetku in koncu odreži.
 2. **Filter neprimernih besed.** Seznam in normalizacija (male črke, odstranjene strešice, `0→o`, `1→i` …, strnjene ponovljene črke) sta v [`js/filter.js`](js/filter.js). Najlažje je to logiko prenesti 1:1.
