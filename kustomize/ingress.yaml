@@ -11,9 +11,20 @@ spec:
   tls:
     - hosts:
         - 4x.lb2.djnd.si
+        - igraj.4xproti.si
       secretName: igraj-4xproti-tls
   rules:
     - host: 4x.lb2.djnd.si
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: igraj-4xproti
+                port:
+                  number: 80
+    - host: igraj.4xproti.si
       http:
         paths:
           - path: /

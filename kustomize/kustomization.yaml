@@ -9,4 +9,4 @@ resources:
 images:
   - name: igraj-4xproti
     newName: rg.fr-par.scw.cloud/djnd/igraj-4xproti
-    newTag: 'a2dfd650cd2fb7bfc7957e5dab09f21fc65d47ae-dirty-20261008093532'
+    newTag: '52bcddaf3ca263849836c97f9e690c6f10cfb981-dirty-20261008101201'
