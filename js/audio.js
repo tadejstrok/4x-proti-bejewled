@@ -1,10 +1,33 @@
-// Synthesized sound effects (Web Audio, no files). Exposed as window.Sfx.
+// Synthesized sound effects plus voice clips from public/ (Web Audio). Exposed as window.Sfx.
 (function (global) {
   'use strict';
 
   var ctx = null, master = null, muted = false;
   var VOLUME = 0.5;
-  try { muted = localStorage.getItem('4xproti-muted') === '1'; } catch (e) {}
+  var VOICE_GAIN = 1.6;
+
+  // Voice clips played at random on bonuses (special tile blasts, combos).
+  var VOICE_FILES = [
+    'public/drhal.mp3',
+    'public/gospodarstvo.mp3',
+    'public/janez-laze.mp3',
+    'public/logar-2.mp3',
+    'public/logar-lazz.mp3',
+    'public/moc.mp3',
+    'public/mocc.mp3',
+    'public/moocc.mp3',
+    'public/podstat.mp3',
+    'public/prevarantom.mp3',
+    'public/soferja.mp3',
+    'public/sudan.mp3',
+    'public/vrtovc.mp3'
+  ];
+  var voices = [], voiceBag = [], lastVoice = null, voiceBusyUntil = 0, voicesRequested = false;
+  var voicesOn = true, currentVoice = null;
+  try {
+    muted = localStorage.getItem('4xproti-muted') === '1';
+    voicesOn = localStorage.getItem('4xproti-voices') !== '0';
+  } catch (e) {}
 
   function unlock() {
     if (!ctx) {
@@ -16,8 +39,52 @@
       master.gain.value = muted ? 0 : VOLUME;
       master.connect(comp);
       comp.connect(ctx.destination);
+      if (voicesOn) loadVoices();
     }
     if (ctx.state === 'suspended') ctx.resume();
+  }
+
+  // Decoded into Web Audio buffers so clips can start later from async game code
+  // (mobile browsers block HTMLAudio.play() outside a tap handler).
+  function loadVoices() {
+    if (voicesRequested || !global.fetch) return;
+    voicesRequested = true;
+    VOICE_FILES.forEach(function (src) {
+      fetch(src)
+        .then(function (r) { if (!r.ok) throw new Error(src); return r.arrayBuffer(); })
+        .then(function (data) { return ctx.decodeAudioData(data); })
+        .then(function (buf) { voices.push(buf); })
+        .catch(function () {});
+    });
+  }
+
+  // Random clip without repeats until every clip has played once.
+  function nextVoice() {
+    if (!voiceBag.length) {
+      voiceBag = voices.slice();
+      for (var i = voiceBag.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = voiceBag[i]; voiceBag[i] = voiceBag[j]; voiceBag[j] = t;
+      }
+      if (voiceBag.length > 1 && voiceBag[voiceBag.length - 1] === lastVoice) {
+        voiceBag.unshift(voiceBag.pop());
+      }
+    }
+    return voiceBag.pop();
+  }
+
+  // Plays a random clip unless one is still playing.
+  function voice() {
+    if (!ctx || muted || !voicesOn || !voices.length || ctx.currentTime < voiceBusyUntil) return;
+    var buf = nextVoice();
+    lastVoice = buf;
+    var src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = buf;
+    g.gain.value = VOICE_GAIN;
+    src.connect(g); g.connect(master);
+    src.start();
+    currentVoice = src;
+    voiceBusyUntil = ctx.currentTime + buf.duration + 0.4;
   }
 
   function tone(freq, dur, type, vol, slideTo, delay) {
@@ -58,6 +125,19 @@
 
   global.Sfx = {
     unlock: unlock,
+    voice: voice,
+    voicesOn: function () { return voicesOn; },
+    // Turns the voice clips on/off; synth effects are unaffected.
+    setVoices: function (on) {
+      voicesOn = on;
+      try { localStorage.setItem('4xproti-voices', on ? '1' : '0'); } catch (e) {}
+      if (on && ctx) loadVoices();
+      if (!on && currentVoice) {
+        try { currentVoice.stop(); } catch (e) {}
+        currentVoice = null;
+        voiceBusyUntil = 0;
+      }
+    },
     isMuted: function () { return muted; },
     setMuted: function (m) {
       muted = m;

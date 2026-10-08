@@ -32,7 +32,10 @@
     <div class="best-line">
       Rekord: <span id="best-timed">0</span> &nbsp;·&nbsp; Zen: <span id="best-zen">0</span>
     </div>
-    <button class="icon-btn mute-btn corner" aria-label="Zvok">🔊</button>
+    <div class="corner">
+      <button class="icon-btn voice-btn" aria-label="Glasovi">🗣</button>
+      <button class="icon-btn mute-btn" aria-label="Zvok">🔊</button>
+    </div>
   </section>
 
   <!-- Game screen -->
@@ -42,6 +45,7 @@
       <div class="stat"><label>Točke</label><span id="score">0</span></div>
       <div class="stat"><label>Nivo</label><span id="level">1</span></div>
       <div class="stat" id="timer-stat"><label>Čas</label><span id="time">90</span></div>
+      <button class="icon-btn voice-btn" aria-label="Glasovi">🗣</button>
       <button class="icon-btn mute-btn" aria-label="Zvok">🔊</button>
     </header>
     <div class="board-wrap" id="board-wrap">
@@ -61,15 +65,17 @@
       <div id="new-record" class="badge" hidden>Nov rekord!</div>
       <div class="final-best">Rekord: <span id="final-best">0</span></div>
     </div>
-    <button id="btn-submit" class="btn primary wide" hidden>Vpiši na lestvico</button>
-    <div class="buttons">
-      <button id="btn-again" class="btn primary">Še enkrat</button>
-      <button id="btn-share" class="btn">Deli</button>
-      <button id="btn-menu" class="btn ghost">Meni</button>
-    </div>
-    <div class="strip">
-      <img src="public/4xproti.png" alt="">
-      <span>V nedeljo<br>glasuj 4X PROTI</span>
+    <div class="over-actions">
+      <button id="btn-submit" class="btn primary" hidden>Vpiši se na lestvico</button>
+      <div class="over-buttons">
+        <button id="btn-again" class="btn primary">Še enkrat</button>
+        <button id="btn-share" class="btn">Deli</button>
+        <button id="btn-menu" class="btn ghost">Meni</button>
+      </div>
+      <div class="strip">
+        <img src="public/4xproti.png" alt="">
+        <span>V nedeljo<br>glasuj 4X PROTI</span>
+      </div>
     </div>
   </section>
 

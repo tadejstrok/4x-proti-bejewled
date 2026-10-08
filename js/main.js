@@ -512,6 +512,8 @@
       } else {
         comboCallout(combo);
       }
+      // Bonus moments (special tile blast or a 1X+ combo) get a random voice clip.
+      if (effects.length || combo >= 3) Sfx.voice();
 
       await sleep(D(240));
       if (!live()) return;
@@ -796,6 +798,24 @@
     });
   });
 
+  function updateVoiceButtons() {
+    var on = Sfx.voicesOn();
+    document.querySelectorAll('.voice-btn').forEach(function (b) {
+      b.classList.toggle('off', !on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.setAttribute('aria-label', on ? 'Izklopi glasove' : 'Vklopi glasove');
+      b.title = on ? 'Glasovi: vklopljeni' : 'Glasovi: izklopljeni';
+    });
+  }
+
+  document.querySelectorAll('.voice-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      Sfx.unlock();
+      Sfx.setVoices(!Sfx.voicesOn());
+      updateVoiceButtons();
+    });
+  });
+
   $('btn-play').addEventListener('click', function () { startGame('timed'); });
   $('btn-zen').addEventListener('click', function () { startGame('zen'); });
   $('btn-again').addEventListener('click', function () { startGame(mode); });
@@ -850,6 +870,7 @@
 
   updateBestLine();
   updateMuteButtons();
+  updateVoiceButtons();
   Promise.all(FACES.map(function (f) { return preload(f.img); }).concat(preload(LOGO))).then(function () {
     $('btn-play').disabled = false;
     $('btn-zen').disabled = false;
