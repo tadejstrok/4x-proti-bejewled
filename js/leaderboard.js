@@ -57,7 +57,22 @@
     return request('/scores?limit=' + limit + '&offset=' + offset);
   }
 
-  // entry: { nickname, message, score, level, durationSeconds }
+  // Starts a timed game on the server: { token, seed }. Null in local test mode.
+  async function newGame() {
+    if (!API_URL) return null;
+    return request('/games', { method: 'POST', body: '{}' });
+  }
+
+  // Sends a finished timed game's moves; the server replays them.
+  // Returns { receipt, score, level }.
+  async function finish(token, moves, score) {
+    return request('/games/finish', {
+      method: 'POST',
+      body: JSON.stringify({ token: token, moves: moves, score: score })
+    });
+  }
+
+  // entry: { nickname, message, score, receipt }. The server takes the score from the receipt.
   // Returns { id, rank, total }.
   async function submit(entry) {
     if (!API_URL) {
@@ -76,13 +91,15 @@
     }
     return request('/scores', {
       method: 'POST',
-      body: JSON.stringify(Object.assign({ mode: 'timed', clientId: clientId() }, entry))
+      body: JSON.stringify({ receipt: entry.receipt, nickname: entry.nickname, message: entry.message, clientId: clientId() })
     });
   }
 
   global.Leaderboard = {
     isLocal: function () { return !API_URL; },
     top: top,
+    newGame: newGame,
+    finish: finish,
     submit: submit
   };
 })(window);

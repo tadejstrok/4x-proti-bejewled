@@ -7,11 +7,14 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
+const { DatabaseSync } = require('node:sqlite');
+require('../js/logic.js');
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = 'test-token-0123456789';
-let proc, dir;
+let proc, dir, secret;
 
 test.before(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), '4xproti-'));
@@ -19,10 +22,15 @@ test.before(async () => {
     env: { ...process.env, PORT: String(PORT), DB_PATH: path.join(dir, 'test.db'), RATE_LIMIT: '3', ADMIN_TOKEN: TOKEN },
     stdio: 'inherit'
   });
-  for (let i = 0; i < 50; i++) {
-    try { await fetch(BASE + '/healthz'); return; } catch (e) { await new Promise((r) => setTimeout(r, 100)); }
+  for (let i = 0; i < 50 && !secret; i++) {
+    try {
+      await fetch(BASE + '/healthz');
+      const db = new DatabaseSync(path.join(dir, 'test.db'));
+      secret = Buffer.from(db.prepare(`SELECT value FROM meta WHERE key = 'secret'`).get().value, 'hex');
+      db.close();
+    } catch (e) { await new Promise((r) => setTimeout(r, 100)); }
   }
-  throw new Error('server did not start');
+  if (!secret) throw new Error('server did not start');
 });
 
 test.after(() => {
@@ -30,18 +38,50 @@ test.after(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function post(body, ip) {
-  return fetch(BASE + '/api/scores', {
+function api(pathname, body, ip) {
+  return fetch(BASE + '/api' + pathname, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Real-Ip': ip || '1.1.1.1' },
-    body: JSON.stringify(body)
+    body: typeof body === 'string' ? body : JSON.stringify(body)
   }).then(async (r) => ({ status: r.status, body: await r.json() }));
 }
 
-const entry = (over) => Object.assign({
-  nickname: 'Mojca', message: 'Se vidimo v nedeljo!', score: 20000, level: 5,
-  durationSeconds: 104, mode: 'timed', clientId: 'c-' + Math.random()
+const post = (body, ip) => api('/scores', body, ip);
+
+// Signs like the server does, with the secret it stored in the database.
+function seal(kind, payload) {
+  return payload + '.' + crypto.createHmac('sha256', secret).update(kind + ':' + payload).digest('base64url');
+}
+
+// A receipt as /games/finish would issue it, without playing.
+function receipt(over) {
+  const r = Object.assign({
+    game: crypto.randomBytes(9).toString('base64url'), score: 20000, level: 5, seconds: 94, finishedAt: Date.now()
+  }, over);
+  return seal('receipt', Buffer.from(JSON.stringify(r)).toString('base64url'));
+}
+
+// A /scores body; `score` goes into its receipt.
+const entry = ({ score, ...over } = {}) => Object.assign({
+  receipt: receipt(score === undefined ? {} : { score }),
+  nickname: 'Mojca', message: 'Se vidimo v nedeljo!', clientId: 'c-' + Math.random()
 }, over);
+
+// Plays the first `count` moves findMove suggests, at the earliest time the rules allow.
+function play(seed, count) {
+  const rand = Logic.rng(seed);
+  const grid = Logic.generateBoard(Logic.SIZE, rand);
+  const moves = [];
+  let ms = 0, score = 0;
+  for (let i = 0; i < count; i++) {
+    const [a, b] = Logic.findMove(grid);
+    const turn = Logic.playTurn(grid, a, b, rand);
+    moves.push([a[0], a[1], b[0], b[1], ms]);
+    score += turn.points;
+    ms += Math.ceil(Logic.minTurnMs(turn, Logic.levelFor(score)));
+  }
+  return { moves, score };
+}
 
 test('empty leaderboard', async () => {
   const r = await fetch(BASE + '/api/scores?limit=10');
@@ -79,16 +119,85 @@ test('rejects bad text with the filter message', async () => {
   assert.strictEqual(l.body.error, 'Povezave v sporočilu niso dovoljene.');
 });
 
-test('rejects implausible scores', async () => {
-  for (const over of [{ score: -5 }, { score: 1.5 }, { score: 200000, durationSeconds: 100 }, { mode: 'zen' }, { durationSeconds: '90' }]) {
-    const r = await post(entry(over), '10.0.2.1');
-    assert.strictEqual(r.status, 400, JSON.stringify(over));
+test('plays, finishes and submits a verified game', async () => {
+  const start = await api('/games', {}, '10.0.7.1');
+  assert.strictEqual(start.status, 201);
+  assert.match(start.body.seed, /^[0-9a-f]{32}$/);
+
+  const { moves, score } = play(start.body.seed, 3);
+  assert.ok(moves[2][4] < 2000, 'fits in the clock slack, so the test needs no waiting');
+  const fin = await api('/games/finish', { token: start.body.token, moves, score }, '10.0.7.1');
+  assert.strictEqual(fin.status, 200, JSON.stringify(fin.body));
+  assert.strictEqual(fin.body.score, score);
+  assert.strictEqual(fin.body.level, Logic.levelFor(score));
+
+  const sub = await post({ receipt: fin.body.receipt, nickname: 'Igralka', message: '', clientId: 'c-play' }, '10.0.7.1');
+  assert.strictEqual(sub.status, 201);
+  const rows = (await (await fetch(BASE + '/api/scores?limit=100')).json());
+  assert.strictEqual(rows.find((r) => r.id === sub.body.id).score, score);
+
+  const again = await post({ receipt: fin.body.receipt, nickname: 'Spet', message: '', clientId: 'c-play2' }, '10.0.7.2');
+  assert.strictEqual(again.status, 409);
+  assert.strictEqual(again.body.error, 'Ta igra je že vpisana.');
+});
+
+test('finish rejects games that were not played by the rules', async () => {
+  const { body: { token, seed } } = await api('/games', {}, '10.0.8.1');
+  const { moves } = play(seed, 3);
+  const cases = [
+    [{ token: token + 'x', moves }, 'Igra ni veljavna.'],
+    [{ token: seal('game', 'abc.' + Date.now()).replace(/.$/, 'A'), moves }, 'Igra ni veljavna.'],
+    [{ token, moves: [[0, 0, 2, 0, 0]] }, 'Igra ni veljavna.'],
+    [{ token, moves: moves.map((m) => [...m.slice(0, 4), 0]) }, 'Igra ni veljavna.'], // faster than the animations
+    [{ token, moves: [[...moves[0].slice(0, 4), 60000]] }, 'Igra ni veljavna.'], // later than the real clock
+    [{ token, moves: 'nope' }, 'Igra ni veljavna.']
+  ];
+  for (const [body, error] of cases) {
+    const r = await api('/games/finish', body, '10.0.8.1');
+    assert.deepStrictEqual([r.status, r.body.error], [400, error], JSON.stringify(body).slice(0, 120));
   }
+
+  // Started long enough ago that even a 90 s game plus the slack is over.
+  const id = 'old-game';
+  const old = seal('game', id + '.' + (Date.now() - 300e3));
+  const seedForOld = crypto.createHmac('sha256', secret).update('seed:' + id).digest('hex').slice(0, 32);
+  const late = await api('/games/finish', { token: old, moves: play(seedForOld, 1).moves }, '10.0.8.1');
+  assert.deepStrictEqual([late.status, late.body.error], [400, 'Igra je trajala predolgo za vpis na lestvico.']);
+});
+
+test('rejects forged, expired and empty receipts', async () => {
+  const forged = receipt().replace(/\.[^.]+$/, '.' + crypto.randomBytes(32).toString('base64url'));
+  const cases = [
+    [{ receipt: 'nope' }, 'Rezultat ni veljaven.'],
+    [{ receipt: forged }, 'Rezultat ni veljaven.'],
+    [{ receipt: undefined }, 'Rezultat ni veljaven.'],
+    [{ receipt: receipt({ score: 0 }) }, 'Rezultat ni veljaven.'],
+    [{ receipt: receipt({ finishedAt: Date.now() - 25 * 3600e3 }) }, 'Vpis je potekel. Odigraj novo igro.']
+  ];
+  for (const [over, error] of cases) {
+    const r = await post(Object.assign(entry(), over), '10.0.2.1');
+    assert.deepStrictEqual([r.status, r.body.error], [400, error]);
+  }
+  // Raising the score breaks the signature.
+  const [payload, sig] = receipt({ score: 100 }).split('.');
+  const raised = JSON.parse(Buffer.from(payload, 'base64url'));
+  raised.score = 999999;
+  const r = await post(entry({ receipt: Buffer.from(JSON.stringify(raised)).toString('base64url') + '.' + sig }), '10.0.2.1');
+  assert.strictEqual(r.status, 400);
+});
+
+test('rate limits games started per IP', async () => {
+  let status;
+  for (let i = 0; i < 201 && status !== 429; i++) status = (await api('/games', {}, '10.0.9.1')).status;
+  assert.strictEqual(status, 429);
+  assert.strictEqual((await api('/games', {}, '10.0.9.2')).status, 201);
 });
 
 test('rejects malformed JSON', async () => {
-  const r = await fetch(BASE + '/api/scores', { method: 'POST', body: '{nope' });
-  assert.strictEqual(r.status, 400);
+  for (const p of ['/scores', '/games/finish']) {
+    const r = await fetch(BASE + '/api' + p, { method: 'POST', body: '{nope' });
+    assert.strictEqual(r.status, 400, p);
+  }
 });
 
 test('rate limits per IP and per clientId', async () => {

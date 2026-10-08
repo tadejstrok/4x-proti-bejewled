@@ -1,10 +1,40 @@
-// Pure board logic: no DOM, no timing. Exposed as window.Logic.
+// Pure game logic: no DOM, no clocks. Exposed as window.Logic.
+// The server loads this file too and replays timed games with it to verify scores (see
+// replay() below), so every rule that affects the score must live here, and all
+// randomness that affects the board must come from the seeded `rand`.
 (function (global) {
   'use strict';
 
   var SIZE = 7;
   var TYPES = 4;
+  var TIMED_SECONDS = 90;
+  var CROSS_TIME_BONUS = 4; // seconds per 4X PROTI tile in timed mode
   var nextId = 1;
+
+  // Deterministic PRNG (sfc32) from a 32-hex-digit seed. Returns floats in [0, 1),
+  // the same sequence in every JS engine.
+  function rng(seed) {
+    var a = parseInt(seed.slice(0, 8), 16) | 0, b = parseInt(seed.slice(8, 16), 16) | 0;
+    var c = parseInt(seed.slice(16, 24), 16) | 0, d = parseInt(seed.slice(24, 32), 16) | 0;
+    function next() {
+      d = d + 1 | 0;
+      var t = (a + b | 0) + d | 0;
+      a = b ^ b >>> 9;
+      b = c + (c << 3) | 0;
+      c = (c << 21 | c >>> 11) + t | 0;
+      return (t >>> 0) / 4294967296;
+    }
+    for (var i = 0; i < 15; i++) next();
+    return next;
+  }
+
+  function threshold(l) { return 750 * l * (l + 1); } // score needed to finish level l
+
+  function levelFor(score) {
+    var l = 1;
+    while (score >= threshold(l)) l++;
+    return l;
+  }
 
   // special: null | 'flame' | 'cross'. Cross (4X PROTI) tiles are colorless (type -1).
   function makeTile(type, special) {
@@ -260,9 +290,164 @@
     return false;
   }
 
+  // Plays the swap of a and b. Returns null (grid untouched) if it isn't a legal move.
+  // Otherwise settles the board in place and returns what happened, one step per cascade,
+  // for the UI to animate:
+  // { steps: [{ combo, cleared: [{r, c, tile}], effects, points, crosses, created: [{r, c, tile}], gravity }],
+  //   points, crosses, shuffled }
+  function playTurn(grid, a, b, rand) {
+    var n = grid.length;
+    if (!inBounds(a[0], a[1], n) || !inBounds(b[0], b[1], n) ||
+        Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) !== 1) return null;
+    var t1 = grid[a[0]][a[1]], t2 = grid[b[0]][b[1]];
+    grid[a[0]][a[1]] = t2; grid[b[0]][b[1]] = t1;
+    var initial = null;
+    if (isSpecialSwap(t1, t2)) {
+      initial = specialSwapEffect(grid, b, a);
+    } else if (!findMatches(grid).length) {
+      grid[a[0]][a[1]] = t1; grid[b[0]][b[1]] = t2;
+      return null;
+    }
+
+    var swapCells = [a, b], steps = [], total = 0, totalCrosses = 0;
+    for (var combo = 1; ; combo++) {
+      var cells, detonated, effects = [], crosses = 0, creations = [];
+      if (initial) {
+        cells = initial.cells;
+        detonated = initial.detonated;
+        effects = initial.effects.slice();
+        crosses = initial.crosses;
+        initial = null;
+      } else {
+        var groups = findMatches(grid);
+        if (!groups.length) break;
+        cells = new Set();
+        detonated = new Set();
+        groups.forEach(function (g) {
+          g.cells.forEach(function (p) { cells.add(p[0] * n + p[1]); });
+          var sp = specialFor(g);
+          if (!sp) return;
+          var pos = null;
+          if (swapCells) {
+            swapCells.forEach(function (s) {
+              if (!pos && g.cells.some(function (p) { return p[0] === s[0] && p[1] === s[1]; })) pos = s;
+            });
+          }
+          if (!pos) {
+            var sorted = g.cells.slice().sort(function (x, y) { return x[0] - y[0] || x[1] - y[1]; });
+            pos = sorted[Math.floor(sorted.length / 2)];
+          }
+          creations.push({ r: pos[0], c: pos[1], special: sp, type: g.type });
+        });
+      }
+
+      var ex = expandBlast(grid, cells, detonated);
+      effects = effects.concat(ex.effects);
+      crosses += ex.crosses;
+
+      var cleared = [];
+      cells.forEach(function (k) {
+        var r = Math.floor(k / n), c = k % n, t = grid[r][c];
+        if (!t) return;
+        grid[r][c] = null;
+        cleared.push({ r: r, c: c, tile: t });
+      });
+      var points = (cleared.length * 10 + effects.length * 100) * combo;
+
+      // New special tiles appear where 4+ matches happened
+      var created = creations.map(function (cr) {
+        var nt = makeTile(cr.special === 'cross' ? -1 : cr.type, cr.special);
+        grid[cr.r][cr.c] = nt;
+        return { r: cr.r, c: cr.c, tile: nt };
+      });
+
+      steps.push({
+        combo: combo, cleared: cleared, effects: effects, points: points, crosses: crosses,
+        created: created, gravity: applyGravity(grid, rand)
+      });
+      total += points;
+      totalCrosses += crosses;
+      swapCells = null;
+    }
+
+    var shuffled = !findMove(grid);
+    if (shuffled) shuffle(grid, rand);
+    return { steps: steps, points: total, crosses: totalCrosses, shuffled: shuffled };
+  }
+
+  // ---------- Timing ----------
+  // Pauses (ms at normal speed) between the animation phases of a turn. Input is blocked
+  // while a turn animates, so these bound how many moves fit in a timed game.
+  var TIMING = { swap: 180, clear: 240, create: 200, settle: 30, noMoves: 800, shuffle: 470 };
+
+  function fallMs(rows) { return 120 + 55 * rows; }
+
+  // Animations speed up with the level; reduced motion makes everything shorter as well.
+  function speed(level, reduced) {
+    return (reduced ? 0.7 : 1) * Math.max(0.6, 1 - 0.05 * (level - 1));
+  }
+
+  // The shortest a turn can take to animate: reduced motion, at the level reached by its end.
+  function minTurnMs(turn, level) {
+    var s = speed(level, true);
+    var ms = TIMING.swap * s;
+    turn.steps.forEach(function (st) {
+      var rows = 0;
+      st.gravity.moves.concat(st.gravity.spawns).forEach(function (m) { rows = Math.max(rows, m.to - m.from); });
+      ms += (TIMING.clear + (st.created.length ? TIMING.create : 0) + fallMs(rows)) * s + TIMING.settle;
+    });
+    if (turn.shuffled) ms += (TIMING.noMoves + TIMING.shuffle) * s;
+    return ms;
+  }
+
+  // Slack for clocks that lag behind the animations (the game clock skips long frames).
+  var PACE = 0.9;
+
+  function timeLimit(crosses) { return TIMED_SECONDS + CROSS_TIME_BONUS * crosses; }
+
+  // Replays a timed game. moves: [[r1, c1, r2, c2, ms], ...], only swaps that were played,
+  // where ms is the game clock (time used so far) when the swap was made.
+  // Returns { ok: true, score, level, crosses, seconds, lastMoveMs } or { ok: false, reason }.
+  function replay(seed, moves) {
+    function fail(i, reason) { return { ok: false, reason: 'move ' + i + ': ' + reason }; }
+    if (typeof seed !== 'string' || !/^[0-9a-f]{32}$/.test(seed)) return { ok: false, reason: 'bad seed' };
+    if (!Array.isArray(moves)) return { ok: false, reason: 'bad moves' };
+    var rand = rng(seed), grid = generateBoard(SIZE, rand);
+    var score = 0, crosses = 0, earliest = 0, last = 0;
+    for (var i = 0; i < moves.length; i++) {
+      var m = moves[i];
+      if (!Array.isArray(m) || m.length !== 5 || !m.every(function (v) { return Number.isInteger(v) && v >= 0; })) {
+        return fail(i, 'malformed');
+      }
+      var ms = m[4];
+      if (ms < last) return fail(i, 'out of order');
+      if (ms < earliest) return fail(i, 'faster than the animations');
+      if (ms >= timeLimit(crosses) * 1000) return fail(i, 'after the time ran out');
+      var turn = playTurn(grid, [m[0], m[1]], [m[2], m[3]], rand);
+      if (!turn) return fail(i, 'illegal swap');
+      score += turn.points;
+      crosses += turn.crosses;
+      earliest += PACE * minTurnMs(turn, levelFor(score));
+      last = ms;
+    }
+    return { ok: true, score: score, level: levelFor(score), crosses: crosses, seconds: timeLimit(crosses), lastMoveMs: last };
+  }
+
   global.Logic = {
     SIZE: SIZE,
     TYPES: TYPES,
+    TIMED_SECONDS: TIMED_SECONDS,
+    CROSS_TIME_BONUS: CROSS_TIME_BONUS,
+    TIMING: TIMING,
+    rng: rng,
+    threshold: threshold,
+    levelFor: levelFor,
+    fallMs: fallMs,
+    speed: speed,
+    timeLimit: timeLimit,
+    playTurn: playTurn,
+    minTurnMs: minTurnMs,
+    replay: replay,
     makeTile: makeTile,
     inBounds: inBounds,
     colorAt: colorAt,
@@ -276,4 +461,4 @@
     applyGravity: applyGravity,
     shuffle: shuffle
   };
-})(window);
+})(typeof window !== 'undefined' ? window : globalThis);

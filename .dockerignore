@@ -6,3 +6,4 @@ kustomize
 
 docker-compose.claude.yaml
 Dockerfile.claude
+*.test.js

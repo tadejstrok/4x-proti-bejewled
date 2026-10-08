@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 
 require('../js/filter.js'); // defines globalThis.TextFilter, same checks as in the browser
+require('../js/logic.js'); // defines globalThis.Logic, used to replay games and check their scores
 
 const PORT = Number(process.env.PORT) || 8080;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'scores.db');
@@ -16,7 +17,12 @@ const STATIC_DIR = path.resolve(process.env.STATIC_DIR || path.join(__dirname, '
 const STATIC_ALLOW = ['index.html', 'style.css', 'js', 'public']; // never serve server/, .git, the db …
 
 const RATE_LIMIT = Number(process.env.RATE_LIMIT) || 5; // entries per client/IP per hour
-const POINTS_PER_SECOND = 1000; // plausibility cap: score <= durationSeconds * this
+const GAME_RATE_LIMIT = 200; // games started per IP per hour
+// A game must be finished within its time limit plus this much (tab switches pause the
+// game clock, so leave room). It bounds how long anyone can study a board offline.
+const GAME_SLACK_MS = 120e3;
+const CLOCK_SLACK_MS = 2000; // client game clock vs server clock
+const RECEIPT_TTL_MS = 24 * 3600e3; // a finished game can go on the leaderboard for this long
 // Moderation page at /admin#<token>. Unset or short token disables it.
 const ADMIN_TOKEN = (process.env.ADMIN_TOKEN || '').length >= 16 ? process.env.ADMIN_TOKEN : '';
 
@@ -32,11 +38,23 @@ db.exec(`
     level      INTEGER NOT NULL,
     duration   INTEGER NOT NULL,
     created_at TEXT NOT NULL,
-    hidden     INTEGER NOT NULL DEFAULT 0
+    hidden     INTEGER NOT NULL DEFAULT 0,
+    game_id    TEXT
   );
   CREATE INDEX IF NOT EXISTS scores_rank ON scores (hidden, score DESC, created_at);
   CREATE INDEX IF NOT EXISTS scores_recent ON scores (created_at);
+  CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `);
+
+// Entries from before verified games have no game_id. Each game goes on the board only once.
+if (!db.prepare(`SELECT 1 FROM pragma_table_info('scores') WHERE name = 'game_id'`).get()) {
+  db.exec(`ALTER TABLE scores ADD COLUMN game_id TEXT`);
+}
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS scores_game ON scores (game_id)`);
+
+// Signs game tokens and receipts. Kept in the database so a restart doesn't void games in progress.
+db.prepare(`INSERT OR IGNORE INTO meta (key, value) VALUES ('secret', ?)`).run(crypto.randomBytes(32).toString('hex'));
+const SECRET = Buffer.from(db.prepare(`SELECT value FROM meta WHERE key = 'secret'`).get().value, 'hex');
 
 // Older databases stored the IP and clientId with each entry. Drop them and rewrite the
 // file so they don't linger in free pages.
@@ -50,8 +68,9 @@ if (legacy.length) {
 const q = {
   top: db.prepare(`SELECT id, nickname, message, score, created_at AS createdAt FROM scores
                    WHERE hidden = 0 ORDER BY score DESC, created_at, id LIMIT ? OFFSET ?`),
-  insert: db.prepare(`INSERT INTO scores (id, nickname, message, score, level, duration, created_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?)`),
+  insert: db.prepare(`INSERT INTO scores (id, nickname, message, score, level, duration, created_at, game_id)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+  hasGame: db.prepare(`SELECT 1 FROM scores WHERE game_id = ?`),
   ahead: db.prepare(`SELECT COUNT(*) AS n FROM scores WHERE hidden = 0
                      AND (score > ? OR (score = ? AND (created_at < ? OR (created_at = ? AND id < ?))))`),
   total: db.prepare(`SELECT COUNT(*) AS n FROM scores WHERE hidden = 0`),
@@ -83,10 +102,10 @@ function rateKey(kind, value) {
   return crypto.createHmac('sha256', RATE_SALT).update(kind + ':' + value).digest('base64url');
 }
 
-function rateLimited(keys) {
+function rateLimited(keys, limit) {
   const hourAgo = Date.now() - 3600e3;
   const counts = keys.map((k) => (recent.get(k) || []).filter((t) => t > hourAgo));
-  if (counts.some((ts) => ts.length >= RATE_LIMIT)) return true;
+  if (counts.some((ts) => ts.length >= limit)) return true;
   keys.forEach((k, i) => recent.set(k, counts[i].concat(Date.now())));
   return false;
 }
@@ -113,36 +132,104 @@ function readBody(req, max) {
   });
 }
 
-const isInt = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
-
-async function postScore(req, res) {
+async function readJson(req, max) {
   let body;
-  try { body = JSON.parse(await readBody(req, 4096)); } catch (e) {
-    return json(res, e.status || 400, { error: 'Neveljavna zahteva.' });
+  try { body = JSON.parse(await readBody(req, max)); } catch (e) {
+    throw Object.assign(new Error('bad request'), { status: e.status || 400 });
   }
-  if (!body || typeof body !== 'object') return json(res, 400, { error: 'Neveljavna zahteva.' });
+  if (!body || typeof body !== 'object') throw Object.assign(new Error('bad request'), { status: 400 });
+  return body;
+}
+
+// ---------- Verified games ----------
+// A timed game starts with a signed token that carries its id and start time; the board's
+// seed is derived from the id. When the game ends, the client sends back its moves, the
+// server replays them with js/logic.js and signs a receipt with the score it got. Only
+// receipts go on the leaderboard, each game once. Nothing is stored until then.
+
+function sign(kind, payload) {
+  return crypto.createHmac('sha256', SECRET).update(kind + ':' + payload).digest('base64url');
+}
+
+function seal(kind, payload) {
+  return payload + '.' + sign(kind, payload);
+}
+
+// Returns the payload of a sealed string, or null if it wasn't signed by us for this kind.
+function unseal(kind, sealed) {
+  if (typeof sealed !== 'string' || sealed.length > 1000) return null;
+  const i = sealed.lastIndexOf('.');
+  if (i < 0) return null;
+  const payload = sealed.slice(0, i);
+  const given = Buffer.from(sealed.slice(i + 1)), want = Buffer.from(sign(kind, payload));
+  return given.length === want.length && crypto.timingSafeEqual(given, want) ? payload : null;
+}
+
+function seedFor(gameId) {
+  return crypto.createHmac('sha256', SECRET).update('seed:' + gameId).digest('hex').slice(0, 32);
+}
+
+function startGame(req, res) {
+  if (rateLimited([rateKey('games', clientIp(req))], GAME_RATE_LIMIT)) {
+    return json(res, 429, { error: 'Preveč iger. Poskusi znova čez eno uro.' });
+  }
+  const id = crypto.randomBytes(9).toString('base64url');
+  json(res, 201, { token: seal('game', id + '.' + Date.now()), seed: seedFor(id) });
+}
+
+// body: { token, moves: [[r1, c1, r2, c2, ms], ...], score? }. `score` is what the
+// player saw; it is only compared with the replay to catch bugs, never trusted.
+async function finishGame(req, res) {
+  const body = await readJson(req, 64 * 1024);
+  const game = unseal('game', body.token);
+  if (!game) return json(res, 400, { error: 'Igra ni veljavna.' });
+  const [id, startedAt] = game.split('.');
+  const wallMs = Date.now() - Number(startedAt);
+
+  const result = Logic.replay(seedFor(id), body.moves);
+  let reason = !result.ok ? result.reason
+    : result.lastMoveMs > wallMs + CLOCK_SLACK_MS ? 'moves are later than the clock'
+    : wallMs > result.seconds * 1000 + GAME_SLACK_MS ? 'finished too late'
+    : '';
+  if (reason) {
+    console.log(`game ${id} rejected: ${reason}`);
+    return json(res, 400, {
+      error: reason === 'finished too late' ? 'Igra je trajala predolgo za vpis na lestvico.' : 'Igra ni veljavna.'
+    });
+  }
+  if (Number.isInteger(body.score) && body.score !== result.score) {
+    console.log(`game ${id}: client score ${body.score}, replay ${result.score}`);
+  }
+  const receipt = seal('receipt', Buffer.from(JSON.stringify({
+    game: id, score: result.score, level: result.level, seconds: result.seconds, finishedAt: Date.now()
+  })).toString('base64url'));
+  json(res, 200, { receipt, score: result.score, level: result.level });
+}
+
+// body: { receipt, nickname, message, clientId }
+async function postScore(req, res) {
+  const body = await readJson(req, 4096);
+  const sealed = unseal('receipt', body.receipt);
+  const played = sealed && JSON.parse(Buffer.from(sealed, 'base64url').toString('utf8'));
+  if (!played || played.score < 1) return json(res, 400, { error: 'Rezultat ni veljaven.' });
+  if (Date.now() - played.finishedAt > RECEIPT_TTL_MS) {
+    return json(res, 400, { error: 'Vpis je potekel. Odigraj novo igro.' });
+  }
+  if (q.hasGame.get(played.game)) return json(res, 409, { error: 'Ta igra je že vpisana.' });
 
   const check = TextFilter.validate(body.nickname, body.message);
   if (!check.ok) return json(res, 400, { error: check.error });
 
-  const { score, level, durationSeconds } = body;
-  if (body.mode !== 'timed' ||
-      !isInt(durationSeconds, 1, 3600) ||
-      !isInt(level, 1, 1000) ||
-      !isInt(score, 1, durationSeconds * POINTS_PER_SECOND)) {
-    return json(res, 400, { error: 'Rezultat ni veljaven.' });
-  }
-
   const keys = [rateKey('ip', clientIp(req))];
   if (body.clientId) keys.push(rateKey('client', String(body.clientId).slice(0, 64)));
-  if (rateLimited(keys)) {
+  if (rateLimited(keys, RATE_LIMIT)) {
     return json(res, 429, { error: 'Preveč vpisov. Poskusi znova čez eno uro.' });
   }
 
   const id = crypto.randomBytes(8).toString('base64url');
   const createdAt = new Date().toISOString();
-  q.insert.run(id, check.nickname, check.message, score, level, durationSeconds, createdAt);
-  const rank = q.ahead.get(score, score, createdAt, createdAt, id).n + 1;
+  q.insert.run(id, check.nickname, check.message, played.score, played.level, played.seconds, createdAt, played.game);
+  const rank = q.ahead.get(played.score, played.score, createdAt, createdAt, id).n + 1;
   json(res, 201, { id, rank, total: q.total.get().n });
 }
 
@@ -166,10 +253,7 @@ function adminList(url, res) {
 
 // body: { nickname?, message?, hidden? }. Edited text goes through the same filter as players' input.
 async function adminUpdate(id, req, res) {
-  let body;
-  try { body = JSON.parse(await readBody(req, 4096)); } catch (e) {
-    return json(res, e.status || 400, { error: 'Neveljavna zahteva.' });
-  }
+  const body = await readJson(req, 4096);
   const row = q.adminGet.get(id);
   if (!row) return json(res, 404, { error: 'Vpis ne obstaja.' });
   const check = TextFilter.validate(
@@ -233,6 +317,10 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST') return await postScore(req, res);
       return json(res, 405, { error: 'Method not allowed' });
     }
+    if (url.pathname === '/api/games' || url.pathname === '/api/games/finish') {
+      if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+      return url.pathname === '/api/games' ? startGame(req, res) : await finishGame(req, res);
+    }
     if (url.pathname === '/admin' && ADMIN_TOKEN) return serveAdminPage(res);
     if (url.pathname.startsWith('/api/admin/')) {
       if (!isAdmin(req)) return json(res, 401, { error: 'Napačen ali manjkajoč žeton.' });
@@ -244,6 +332,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' || req.method === 'HEAD') return serveStatic(url, req, res);
     json(res, 405, { error: 'Method not allowed' });
   } catch (err) {
+    if (err.status) return json(res, err.status, { error: 'Neveljavna zahteva.' });
     console.error(err);
     if (!res.headersSent) json(res, 500, { error: 'Napaka na strežniku. Poskusi znova.' });
   }

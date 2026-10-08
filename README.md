@@ -8,7 +8,7 @@ Needs Node 22.13+ (for the built-in `node:sqlite`).
 
 ```bash
 node server/server.js        # http://localhost:8080, scores in ./scores.db
-node --test server/server.test.js
+node --test js/logic.test.js server/server.test.js
 ```
 
 Opening `index.html` straight from disk also works; the leaderboard then falls back to local test mode (this browser only).
@@ -47,12 +47,12 @@ Backup: `kubectl -n proti-4x exec deploy/igraj-4xproti -- sqlite3 /data/scores.d
 
 ## Files
 
-- `js/logic.js`: board model (matches, specials, gravity, shuffle). Pure logic with no DOM.
+- `js/logic.js`: game rules (matches, specials, gravity, shuffle, scoring, timing) and the replay that verifies timed games. Pure logic with no DOM, shared by the browser and the server. `js/logic.test.js` tests it.
 - `js/audio.js`: synthesized sound effects (Web Audio).
 - `js/main.js`: rendering, input, game flow and screens.
 - `js/filter.js`: nickname/message validation and profanity filter.
 - `js/leaderboard.js`: leaderboard data layer. Talks to `api/` on the same host (see `LEADERBOARD-API.md`); local test mode when opened from disk.
-- `server/server.js`: static files + leaderboard API + SQLite. `server/admin.html` is the moderation page. `server/server.test.js` tests both.
+- `server/server.js`: static files + leaderboard API + SQLite. Timed games are replayed on the server before they can go on the leaderboard (see `LEADERBOARD-API.md`). `server/admin.html` is the moderation page. `server/server.test.js` tests both.
 - `kustomize/`, `Dockerfile`, `build-and-push.sh`: deployment.
 - `public/`: tile images and logo.
 

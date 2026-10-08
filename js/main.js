@@ -10,8 +10,7 @@
     { img: 'public/vrtovec.png', ring: '#FF2D95' }
   ];
   var LOGO = 'public/4xproti.png';
-  var TIMED_SECONDS = 90;
-  var CROSS_TIME_BONUS = 4;
+  var T = Logic.TIMING;
   var HINT_DELAY = 5000;
   // Leaderboard messages are off for now: no input on the submit form, not shown on the board.
   var SHOW_MESSAGES = false;
@@ -27,12 +26,15 @@
   var els = new Map(); // tile.id -> element
   var state = 'menu';  // menu | playing | over
   var mode = 'timed';  // timed | zen
-  var score = 0, level = 1, timeLeft = TIMED_SECONDS, lastTick = 0;
+  var score = 0, level = 1, lastTick = 0;
+  var elapsed = 0, crosses = 0; // timed mode: game clock (s) and 4X PROTI tiles earned, which add time
   var busy = false, timeUp = false, selected = null, drag = null;
   var lastAction = 0, hintIds = [];
   var cellPx = 48, dpr = 1;
   var gameId = 0; // bumps on every new game so stale async cascades stop
-  var gameStartedAt = 0, gameDuration = 0, submitted = false;
+  var rand = null;     // seeded board randomness; nothing else may draw from it
+  var moves = [];      // timed mode: [r1, c1, r2, c2, ms] per played swap, for the server to replay
+  var gameToken = null, finishing = null, starting = false, submitted = false;
 
   // ---------- Storage ----------
   function loadBest(m) {
@@ -44,9 +46,7 @@
 
   // ---------- Helpers ----------
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-  function speed() { return (REDUCED ? 0.7 : 1) * Math.max(0.6, 1 - 0.05 * (level - 1)); }
-  function D(ms) { return Math.round(ms * speed()); }
-  function key(r, c) { return r * N + c; }
+  function D(ms) { return Math.round(ms * Logic.speed(level, REDUCED)); }
   function fmt(n) { return n.toLocaleString('sl-SI'); }
 
   function showScreen(name) {
@@ -86,6 +86,7 @@
     var face = document.createElement('div');
     face.className = 'face';
     el.appendChild(face);
+    el.tile = tile;
     updateTileLook(el, tile);
     board.appendChild(el);
     els.set(tile.id, el);
@@ -105,7 +106,9 @@
     }
   }
 
+  // Also remembers where the tile is headed: during a turn, `grid` already holds the settled board.
   function place(el, r, c, dur, ease) {
+    el.r = r; el.c = c;
     el.style.transition = dur ? 'transform ' + dur + 'ms ' + (ease || 'ease-out') : 'none';
     el.style.transform = 'translate(' + (c * 100) + '%, ' + (r * 100) + '%)';
   }
@@ -322,14 +325,12 @@
   }
 
   // ---------- Score & level ----------
-  function threshold(l) { return 750 * l * (l + 1); } // score needed to finish level l
-
   function addScore(points) {
     score += points;
     var s = $('score');
     s.textContent = fmt(score);
     s.classList.remove('bump'); void s.offsetWidth; s.classList.add('bump');
-    while (score >= threshold(level)) {
+    while (score >= Logic.threshold(level)) {
       level++;
       $('level').textContent = level;
       document.documentElement.style.setProperty('--intensity', Math.min(1, (level - 1) / 8));
@@ -339,23 +340,57 @@
   }
 
   function updateProgress() {
-    var lo = threshold(level - 1), hi = threshold(level);
+    var lo = Logic.threshold(level - 1), hi = Logic.threshold(level);
     $('progress-fill').style.width = Math.min(100, (score - lo) / (hi - lo) * 100) + '%';
   }
+
+  function timeLeft() { return Logic.timeLimit(crosses) - elapsed; }
 
   function updateTimer() {
     var stat = $('timer-stat');
     if (mode !== 'timed') { $('time').textContent = '∞'; stat.classList.remove('low'); return; }
-    $('time').textContent = Math.ceil(timeLeft);
-    stat.classList.toggle('low', timeLeft <= 10 && timeLeft > 0);
+    var left = Math.max(0, timeLeft());
+    $('time').textContent = Math.ceil(left);
+    stat.classList.toggle('low', left <= 10 && left > 0);
+  }
+
+  function randomSeed() {
+    var words = new Uint32Array(4);
+    crypto.getRandomValues(words);
+    return Array.from(words, function (w) { return ('0000000' + w.toString(16)).slice(-8); }).join('');
+  }
+
+  // Timed games get their board from the server, so the score can be verified later.
+  // Without it the game still runs, it just can't go on the leaderboard.
+  async function fetchGame() {
+    if (Leaderboard.isLocal()) return null;
+    try {
+      return await Promise.race([
+        Leaderboard.newGame(),
+        sleep(5000).then(function () { throw new Error('timeout'); })
+      ]);
+    } catch (e) {
+      toast(e.status === 429 ? e.serverMessage : 'Brez povezave: rezultata ne bo mogoče vpisati na lestvico.');
+      return null;
+    }
   }
 
   // ---------- Game flow ----------
-  function startGame(m) {
+  async function startGame(m) {
+    if (starting) return;
     Sfx.unlock();
+    var game = null;
+    if (m === 'timed') {
+      starting = true;
+      game = await fetchGame();
+      starting = false;
+    }
     mode = m;
     gameId++;
-    score = 0; level = 1; timeLeft = TIMED_SECONDS; lastTick = Math.ceil(timeLeft);
+    gameToken = game && game.token;
+    rand = Logic.rng(game ? game.seed : randomSeed());
+    moves = []; finishing = null;
+    score = 0; level = 1; elapsed = 0; crosses = 0; lastTick = Math.ceil(timeLeft());
     busy = false; timeUp = false; selected = null; drag = null; hintIds = [];
     parts = []; rings = []; beams = [];
     document.documentElement.style.setProperty('--intensity', 0);
@@ -365,10 +400,9 @@
     updateProgress();
     updateTimer();
     showScreen('game');
-    grid = Logic.generateBoard(N);
+    grid = Logic.generateBoard(N, rand);
     renderAll();
     lastAction = performance.now();
-    gameStartedAt = lastAction;
     submitted = false;
     state = 'playing';
   }
@@ -376,7 +410,7 @@
   function endGame() {
     if (state !== 'playing') return;
     state = 'over';
-    gameDuration = Math.round((performance.now() - gameStartedAt) / 1000);
+    if (mode === 'timed' && gameToken) sendMoves();
     setSelected(null);
     clearHint();
     var best = loadBest(mode);
@@ -408,26 +442,23 @@
     busy = true;
     clearHint();
     var id = gameId;
-    var r1 = a[0], c1 = a[1], r2 = b[0], c2 = b[1];
-    var t1 = grid[r1][c1], t2 = grid[r2][c2];
+    var t1 = grid[a[0]][a[1]], t2 = grid[b[0]][b[1]];
     var e1 = els.get(t1.id), e2 = els.get(t2.id);
+    var at = Math.floor(elapsed * 1000);
+    var turn = Logic.playTurn(grid, a, b, rand); // settles `grid` right away; the rest is animation
+    if (turn && mode === 'timed') moves.push([a[0], a[1], b[0], b[1], at]);
     Sfx.swap();
-    place(e1, r2, c2, D(170));
-    place(e2, r1, c1, D(170));
-    grid[r1][c1] = t2; grid[r2][c2] = t1;
-    await sleep(D(180));
+    place(e1, b[0], b[1], D(170));
+    place(e2, a[0], a[1], D(170));
+    await sleep(D(T.swap));
     if (id !== gameId) return;
 
-    if (Logic.isSpecialSwap(t1, t2)) {
-      var eff = Logic.specialSwapEffect(grid, b, a);
-      await resolve(eff, [a, b], id);
-    } else if (Logic.findMatches(grid).length) {
-      await resolve(null, [a, b], id);
+    if (turn) {
+      await animateTurn(turn, id);
     } else {
       Sfx.invalid();
-      grid[r1][c1] = t1; grid[r2][c2] = t2;
-      place(e1, r1, c1, D(170));
-      place(e2, r2, c2, D(170));
+      place(e1, a[0], a[1], D(170));
+      place(e2, b[0], b[1], D(170));
       e1.firstChild.classList.add('nope');
       e2.firstChild.classList.add('nope');
       await sleep(D(320));
@@ -439,60 +470,24 @@
     afterTurn();
   }
 
-  // Clears matches (or an initial special blast), drops tiles and repeats until stable.
-  async function resolve(initial, swapCells, id) {
-    var combo = 0;
+  // Animates a turn from Logic.playTurn, one cascade step at a time. The pauses here are
+  // the ones Logic.minTurnMs counts, so keep the two in step.
+  async function animateTurn(turn, id) {
     function live() { return state === 'playing' && id === gameId; }
-    while (live()) {
-      var cells, detonated, effects = [], crosses = 0, creations = [];
-      if (initial) {
-        cells = initial.cells;
-        detonated = initial.detonated;
-        effects = initial.effects.slice();
-        crosses = initial.crosses;
-        initial = null;
-      } else {
-        var groups = Logic.findMatches(grid);
-        if (!groups.length) break;
-        cells = new Set();
-        detonated = new Set();
-        groups.forEach(function (g) {
-          g.cells.forEach(function (p) { cells.add(key(p[0], p[1])); });
-          var sp = Logic.specialFor(g);
-          if (!sp) return;
-          var pos = null;
-          if (swapCells) {
-            swapCells.forEach(function (s) {
-              if (!pos && g.cells.some(function (p) { return p[0] === s[0] && p[1] === s[1]; })) pos = s;
-            });
-          }
-          if (!pos) {
-            var sorted = g.cells.slice().sort(function (x, y) { return x[0] - y[0] || x[1] - y[1]; });
-            pos = sorted[Math.floor(sorted.length / 2)];
-          }
-          creations.push({ r: pos[0], c: pos[1], special: sp, type: g.type });
-        });
-      }
-      combo++;
-
-      var ex = Logic.expandBlast(grid, cells, detonated);
-      effects = effects.concat(ex.effects);
-      crosses += ex.crosses;
+    for (var i = 0; i < turn.steps.length && live(); i++) {
+      var st = turn.steps[i], effects = st.effects;
 
       // Clear
-      var sumR = 0, sumC = 0, count = 0;
-      cells.forEach(function (k) {
-        var r = Math.floor(k / N), c = k % N, t = grid[r][c];
-        if (!t) return;
-        grid[r][c] = null;
-        sumR += r; sumC += c; count++;
-        var el = els.get(t.id);
-        els.delete(t.id);
+      var sumR = 0, sumC = 0, count = st.cleared.length;
+      st.cleared.forEach(function (p) {
+        sumR += p.r; sumC += p.c;
+        var el = els.get(p.tile.id);
+        els.delete(p.tile.id);
         el.style.zIndex = 3;
         el.firstChild.classList.remove('selected', 'hint');
         el.firstChild.classList.add('pop');
         setTimeout(function () { el.remove(); }, 280);
-        burst(r, c, t.special === 'cross' ? '#FF7F00' : FACES[t.type].ring, 10);
+        burst(p.r, p.c, p.tile.special === 'cross' ? '#FF7F00' : FACES[p.tile.type].ring, 10);
       });
 
       if (effects.length) {
@@ -500,49 +495,46 @@
         Sfx.boom();
         shake();
       }
-      Sfx.pop(combo);
+      Sfx.pop(st.combo);
 
-      var points = (count * 10 + effects.length * 100) * combo;
-      addScore(points);
-      if (count) popup(sumR / count, sumC / count, '+' + fmt(points));
-      if (mode === 'timed' && crosses) {
-        timeLeft += CROSS_TIME_BONUS * crosses;
+      addScore(st.points);
+      if (count) popup(sumR / count, sumC / count, '+' + fmt(st.points));
+      if (mode === 'timed' && st.crosses) {
+        crosses += st.crosses;
         updateTimer();
         Sfx.bonus();
-        popup(0.6, N / 2 - 0.5, '+' + (CROSS_TIME_BONUS * crosses) + ' s', 'time');
+        popup(0.6, N / 2 - 0.5, '+' + (Logic.CROSS_TIME_BONUS * st.crosses) + ' s', 'time');
       }
       if (effects.some(function (e) { return e.kind !== 'flame'; })) {
         callout('4X PROTI!', true, randomSlogans(4));
         flash();
       } else {
-        comboCallout(combo);
+        comboCallout(st.combo);
       }
       // Bonus moments (special tile blast or a 1X+ combo) get a random voice clip.
-      if (effects.length || combo >= 3) Sfx.voice();
+      if (effects.length || st.combo >= 3) Sfx.voice();
 
-      await sleep(D(240));
+      await sleep(D(T.clear));
       if (!live()) return;
 
       // New special tiles appear where 4+ matches happened
-      creations.forEach(function (cr) {
-        var nt = Logic.makeTile(cr.special === 'cross' ? -1 : cr.type, cr.special);
-        grid[cr.r][cr.c] = nt;
-        var el = tileEl(nt);
+      st.created.forEach(function (cr) {
+        var el = tileEl(cr.tile);
         place(el, cr.r, cr.c, 0);
         el.firstChild.classList.add('born');
         setTimeout(function () { el.firstChild.classList.remove('born'); }, 450);
       });
-      if (creations.length) {
+      if (st.created.length) {
         Sfx.create();
-        await sleep(D(200));
+        await sleep(D(T.create));
         if (!live()) return;
       }
 
       // Gravity
-      var g = Logic.applyGravity(grid);
+      var g = st.gravity;
       var maxDur = 0;
       g.moves.forEach(function (m) {
-        var dur = D(120 + 55 * (m.to - m.from));
+        var dur = D(Logic.fallMs(m.to - m.from));
         maxDur = Math.max(maxDur, dur);
         place(els.get(m.tile.id), m.to, m.c, dur, BOUNCE);
       });
@@ -553,22 +545,20 @@
       });
       void board.offsetHeight;
       spawned.forEach(function (o) {
-        var dur = D(120 + 55 * (o.s.to - o.s.from));
+        var dur = D(Logic.fallMs(o.s.to - o.s.from));
         maxDur = Math.max(maxDur, dur);
         place(o.el, o.s.to, o.s.c, dur, BOUNCE);
       });
-      await sleep(maxDur + 30);
-      swapCells = null;
+      await sleep(maxDur + T.settle);
     }
 
-    if (live() && !Logic.findMove(grid)) await reshuffle();
+    if (live() && turn.shuffled) await reshuffle();
   }
 
   async function reshuffle() {
     callout('NI VEČ POTEZ!', false);
-    await sleep(D(800));
+    await sleep(D(T.noMoves));
     Sfx.shuffle();
-    Logic.shuffle(grid);
     for (var r = 0; r < N; r++) {
       for (var c = 0; c < N; c++) {
         var el = els.get(grid[r][c].id);
@@ -576,7 +566,7 @@
         place(el, r, c, D(450), 'cubic-bezier(.5, 0, .2, 1)');
       }
     }
-    await sleep(D(470));
+    await sleep(D(T.shuffle));
   }
 
   // ---------- Input ----------
@@ -645,14 +635,13 @@
 
     if (state === 'playing') {
       if (mode === 'timed' && !timeUp) {
-        timeLeft -= dt;
-        var sec = Math.ceil(timeLeft);
+        elapsed += dt;
+        var sec = Math.ceil(timeLeft());
         if (sec !== lastTick) {
           lastTick = sec;
           if (sec <= 10 && sec > 0) Sfx.tick();
         }
-        if (timeLeft <= 0) {
-          timeLeft = 0;
+        if (timeLeft() <= 0) {
           timeUp = true;
           setSelected(null);
           callout('ZMANJKALO\nJE ČASA!', true);
@@ -662,10 +651,9 @@
       }
       if (!busy && !timeUp && !hintIds.length && now - lastAction > HINT_DELAY) showHint();
       if (!REDUCED) {
-        for (var r = 0; r < N; r++) for (var c = 0; c < N; c++) {
-          var t = grid[r][c];
-          if (t && t.special === 'flame' && Math.random() < 0.08) ember(r, c);
-        }
+        els.forEach(function (el) {
+          if (el.tile.special === 'flame' && Math.random() < 0.08) ember(el.r, el.c);
+        });
       }
     }
     drawFx();
@@ -717,9 +705,27 @@
     tipTimer = null;
   }
 
-  // Only timed games go on the leaderboard (zen scores are unbounded).
+  // Has the server replay the moves right away: it only accepts games finished on time.
+  function sendMoves() {
+    finishing = Leaderboard.finish(gameToken, moves, score);
+    finishing.catch(function () {}); // handled when the player submits
+  }
+
+  // The server's receipt for this game, retrying once if the first try never got through.
+  async function getReceipt() {
+    if (!finishing) return null; // local test mode
+    try {
+      return (await finishing).receipt;
+    } catch (err) {
+      if (err.status) throw err;
+      sendMoves();
+      return (await finishing).receipt;
+    }
+  }
+
+  // Only verified timed games go on the leaderboard (zen scores are unbounded).
   function updateSubmitButton() {
-    var canSubmit = mode === 'timed' && score > 0 && !submitted;
+    var canSubmit = mode === 'timed' && score > 0 && !submitted && (!!gameToken || Leaderboard.isLocal());
     $('btn-submit').hidden = !canSubmit;
     $('btn-again').classList.toggle('primary', !canSubmit);
   }
@@ -762,8 +768,7 @@
         nickname: check.nickname,
         message: check.message,
         score: score,
-        level: level,
-        durationSeconds: gameDuration
+        receipt: await getReceipt()
       });
       submitted = true;
       try { localStorage.setItem('4xproti-nickname', check.nickname); } catch (err) {}
@@ -977,7 +982,7 @@
       get grid() { return grid; },
       get busy() { return busy; },
       get score() { return score; },
-      set timeLeft(v) { timeLeft = v; },
+      set timeLeft(v) { elapsed = Logic.timeLimit(crosses) - v; },
       swap: attemptSwap,
       render: renderAll
     };
