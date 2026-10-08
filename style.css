@@ -212,6 +212,19 @@ body {
   box-shadow: 0 3px 0 rgba(0, 0, 0, 0.7), inset 0 0 0 2px rgba(0, 0, 0, 0.4);
   transition: transform 0.12s ease-out, box-shadow 0.12s;
 }
+/* Tint the photo with the ring color so tile types read apart at a glance.
+   'color' keeps the photo's light/dark but takes the ring's hue (white ring = grayscale). */
+.face::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--ring, transparent);
+  mix-blend-mode: color;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.face.cross::after { display: none; }
 .face.cross {
   inset: 5%;
   border-radius: 14%;
